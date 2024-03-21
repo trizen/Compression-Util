@@ -97,9 +97,9 @@ An array of symbols means an array of non-negative integer values.
 
 ### filehandle
 
-An input filehandle is denoted by `$fh`, while an output filehandle is denoted by `$out_fh`.
+An input filehandle is denoted by `$fh`, while an output file-handle is denoted by `$out_fh`.
 
-The encoding of input and output filehandles must be set to `:raw`.
+The encoding of input and output file-handles must be set to `:raw`.
 
 # HIGH-LEVEL FUNCTIONS
 
@@ -201,9 +201,9 @@ The encoding of input and output filehandles must be set to `:raw`.
 
 High-level function that generates a Huffman coding block.
 
-It takes two parameters: `\@symbols`, which represents the symbols to be encoded, and `$out_fh`, which is optional, and represents the filehandle where to write the result.
+It takes two parameters: `\@symbols`, which represents the symbols to be encoded, and `$out_fh`, which is optional, and represents the file-handle where to write the result.
 
-When the second parameter is ommited, the function returns a binary string.
+When the second parameter is omitted, the function returns a binary string.
 
 ## decode\_huffman\_entry
 
@@ -223,9 +223,9 @@ Inverse of `create_huffman_entry()`.
 
 High-level function that generates an Arithmetic Coding block.
 
-It takes two parameters: `\@symbols`, which represents the symbols to be encoded, and `$out_fh`, which is optional, and represents the filehandle where to write the result.
+It takes two parameters: `\@symbols`, which represents the symbols to be encoded, and `$out_fh`, which is optional, and represents the file-handle where to write the result.
 
-When the second parameter is ommited, the function returns a binary string.
+When the second parameter is omitted, the function returns a binary string.
 
 ## decode\_ac\_entry
 
@@ -317,17 +317,17 @@ It takes a single parameter, `$data`, representing the data string to be compres
     my $data = lzw_decompress($string);
 ```
 
-Performs Lempel-Ziv-Welch (LZW) decompression on the provided string or filehandle. Inverse of `lzw_compress()`.
+Performs Lempel-Ziv-Welch (LZW) decompression on the provided string or file-handle. Inverse of `lzw_compress()`.
 
 ## bz2\_compress
 
 ```perl
     # Using Huffman Coding
-    bz2_compress($data, $out_fh);        # writes to filehandle
+    bz2_compress($data, $out_fh);        # writes to file-handle
     my $string = bz2_compress($data);    # returns a binary string
 
     # Using Arithmetic Coding
-    bz2_compress($data, $out_fh, \&create_ac_entry);               # writes to filehandle
+    bz2_compress($data, $out_fh, \&create_ac_entry);               # writes to file-handle
     my $string = bz2_compress($data, undef, \&create_ac_entry);    # returns a binary string
 ```
 
@@ -348,11 +348,11 @@ When the additional optional argument, `$out_fh`, is provided, the compressed da
 ## bz2\_decompress
 
 ```perl
-    # Writes to filehandle
+    # Writes to file-handle
     bz2_decompress($fh, $out_fh);
     bz2_decompress($string, $out_fh);
 
-    # Writes to filehandle (does Arithmetic decoding)
+    # Writes to file-handle (does Arithmetic decoding)
     bz2_decompress($fh, $out_fh, \&decode_ac_entry);
     bz2_decompress($string, $out_fh, \&decode_ac_entry);
 
@@ -371,11 +371,11 @@ Inverse of `bz2_compress()`.
 
 ```perl
     # Does Huffman coding
-    bz2_compress_symbolic(\@symbols, $out_fh);      # writes to filehandle
+    bz2_compress_symbolic(\@symbols, $out_fh);      # writes to file-handle
     my $string = bz2_compress_symbolic(\@symbols);  # returns a binary string
 
     # Does Arithmetic coding
-    bz2_compress_symbolic(\@symbols, $out_fh, \&create_ac_entry);             # writes to filehandle
+    bz2_compress_symbolic(\@symbols, $out_fh, \&create_ac_entry);             # writes to file-handle
     my $string = bz2_compress_symbolic(\@symbols, undef, \&create_ac_entry);  # returns a binary string
 ```
 
@@ -413,7 +413,7 @@ It takes two parameters: `\@integers`, representing the sequence of arbitrary in
 ## delta\_decode
 
 ```perl
-    # Given a filehandle
+    # Given a file-handle
     my $integers = delta_decode($fh);
     my $integers = delta_decode($fh, 1);       # double
 
@@ -435,7 +435,7 @@ Encodes a sequence of non-negative integers using Fibonacci coding, returning a 
 ## fibonacci\_decode
 
 ```perl
-    # Given a filehandle
+    # Given a file-handle
     my $symbols = fibonacci_decode($fh);
 
     # Given a binary string
@@ -455,7 +455,7 @@ Encodes a sequence of non-negative integers using Elias Omega coding, returning 
 ## elias\_omega\_decode
 
 ```perl
-    # Given a filehandle
+    # Given a file-handle
     my $symbols = elias_omega_decode($fh);
 
     # Given a binary string
@@ -497,7 +497,7 @@ Applies the Burrows-Wheeler Transform (BWT) to a given string.
 
 It returns two values: `$bwt`, which represents the transformed string, and `$idx`, which holds the index of the original string in the sorted list of rotations.
 
-It takes an optional argument `$lookahead_len`, which defaults to `128`, representing the length of lookahead during sorting.
+It takes an optional argument `$lookahead_len`, which defaults to `128`, representing the length of look-ahead during sorting.
 
 ## bwt\_decode
 
@@ -567,7 +567,7 @@ Efficienlty encodes the MTF alphabet into a string.
     my $alphabet = mtf_decode_alphabet($fh);
 ```
 
-Decodes the MTF alphabet, given a filehandle `$fh`, returning an array of symbols.
+Decodes the MTF alphabet, given a file-handle `$fh`, returning an array of symbols.
 
 ## rle4\_encode
 
@@ -602,7 +602,7 @@ Performs Zero-Run-Length Encoding (ZRLE) on a sequence of symbolic elements.
 
 It takes a single parameter `$symbols`, representing the sequence of symbols to be encoded, and returns the encoded ZRLE sequence as an array-ref of symbols.
 
-This function efficiently encodes only runs of zeros, but also incremenets each symbol by `1`.
+This function efficiently encodes only runs of zeros, but also increments each symbol by `1`.
 
 ## zrle\_decode
 
@@ -663,7 +663,7 @@ It takes a single parameter, `\@symbols`, representing the encoded symbols to be
     my $bit = read_bit($fh, \$buffer);
 ```
 
-Reads a single bit from a filehandle `$fh`.
+Reads a single bit from a file-handle `$fh`.
 
 The function stores the extra bits inside the `$buffer`, reading one character at a time from the filehandle.
 
@@ -673,7 +673,7 @@ The function stores the extra bits inside the `$buffer`, reading one character a
     my $bits = read_bits($fh, $bits_len);
 ```
 
-Reads a specified number of bits (`$bits_len`) from a filehandle (`$fh`) and returns them as a string.
+Reads a specified number of bits (`$bits_len`) from a file-handle (`$fh`) and returns them as a string.
 
 ## bwt\_sort
 
@@ -684,7 +684,7 @@ Reads a specified number of bits (`$bits_len`) from a filehandle (`$fh`) and ret
 
 Low-level function that sorts the rotations of a given string using the Burrows-Wheeler Transform (BWT) algorithm.
 
-It takes two parameters: `$string`, which is the input string to be transformed, and `$LOOKAHEAD_LEN` (optional), representing the length of lookahead during sorting.
+It takes two parameters: `$string`, which is the input string to be transformed, and `$LOOKAHEAD_LEN` (optional), representing the length of look-ahead during sorting.
 
 The function returns an array-ref of indices.
 
@@ -748,7 +748,7 @@ Low-level function that performs LZSS (Lempel-Ziv-Storer-Szymanski) compression 
 
 It takes a single parameter, `$data`, representing the data string to be compressed.
 
-The function returns three values: `$literals`, which is an array-ref of uncompressed bytes, `$indices`, which contains the indices of the back-references, and `$lengths`, which holds the lengths of the matched substrings.
+The function returns three values: `$literals`, which is an array-ref of uncompressed bytes, `$indices`, which contains the indices of the back-references, and `$lengths`, which holds the lengths of the matched sub-strings.
 
 A back-reference is returned only when it's beneficial (i.e.: when it may not inflate the data). Otherwise, the corresponding index and length are both set to `0`.
 
@@ -764,7 +764,7 @@ Low-level function that performs LZ77 (Lempel-Ziv 1977) compression on the provi
 
 It takes a single parameter, `$data`, representing the data string to be compressed.
 
-The function returns three values: `$literals`, which is an array-ref of uncompressed bytes, `$indices`, which contains the indices of the matched substrings, and `$lengths`, which holds the lengths of the matched substrings.
+The function returns three values: `$literals`, which is an array-ref of uncompressed bytes, `$indices`, which contains the indices of the matched sub-strings, and `$lengths`, which holds the lengths of the matched sub-strings.
 
 Lengths are limited to `255`.
 
@@ -775,16 +775,16 @@ Lengths are limited to `255`.
     my $data = lzss_decode($literals, $indices, $lengths);
 ```
 
-Low-level function that performs LZ77 (Lempel-Ziv 1977) decompression using the provided literals, indices, and lengths of matched substrings.
+Low-level function that performs LZ77 (Lempel-Ziv 1977) decompression using the provided literals, indices, and lengths of matched sub-strings.
 
-It takes three parameters: `$literals`, representing the array-ref of uncompressed bytes, `$indices`, containing the indices of the matched substrings, and `$lengths`, holding the lengths of the matched substrings.
+It takes three parameters: `$literals`, representing the array-ref of uncompressed bytes, `$indices`, containing the indices of the matched sub-strings, and `$lengths`, holding the lengths of the matched sub-strings.
 
 The function returns the decompressed data as a string.
 
 ## deflate\_encode
 
 ```perl
-    # Writes to filehandle
+    # Writes to file-handle
     deflate_encode($size, \@literals, \@distances, \@lengths, $out_fh);
     deflate_encode($size, \@literals, \@distances, \@lengths, $out_fh, \&create_ac_entry);
 
