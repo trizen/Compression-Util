@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 17;
+plan tests => 45;
 
 ##################################
 
@@ -15,6 +15,7 @@ plan tests => 17;
 
     is_deeply(abc_decode(abc_encode(\@arr)),                      \@arr);
     is_deeply(ac_decode(ac_encode(\@arr)),                        \@arr);
+    is_deeply(adaptive_ac_decode(adaptive_ac_encode(\@arr)),      \@arr);
     is_deeply(elias_gamma_decode(elias_gamma_encode(\@arr)),      \@arr);
     is_deeply(elias_omega_decode(elias_omega_encode(\@arr)),      \@arr);
     is_deeply(fibonacci_decode(fibonacci_encode(\@arr)),          \@arr);
@@ -23,6 +24,10 @@ plan tests => 17;
     is_deeply(rle4_decode(rle4_decode(\@arr)),                    \@arr);
     is_deeply([map { ($_->[0]) x $_->[1] } @{run_length(\@arr)}], \@arr);
 
+    is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic(\@arr)), \@arr);
+    is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic(\@arr, undef, \&create_ac_entry),          \&decode_ac_entry),          \@arr);
+    is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic(\@arr, undef, \&create_adaptive_ac_entry), \&decode_adaptive_ac_entry), \@arr);
+
     is_deeply(\@arr, \@copy);    # make sure the array has not been modified in-place
 }
 
@@ -30,6 +35,7 @@ plan tests => 17;
 
 {
     my @symbols = unpack('C*', join('', 'a' x 13, 'b' x 14, 'c' x 10, 'd' x 3, 'e' x 1, 'f' x 1, 'g' x 4));
+    my @copy    = @symbols;
 
     my $rl  = run_length(\@symbols);
     my $rl2 = run_length(\@symbols, 10);
@@ -41,6 +47,37 @@ plan tests => 17;
     is_deeply([map { ($_->[0]) x $_->[1] } @$rl2], \@symbols);
 
     is_deeply(rle4_decode(rle4_encode(\@symbols)), \@symbols);
+
+    is_deeply(decode_huffman_entry(create_huffman_entry(\@symbols)),         \@symbols);
+    is_deeply(decode_ac_entry(create_ac_entry(\@symbols)),                   \@symbols);
+    is_deeply(decode_adaptive_ac_entry(create_adaptive_ac_entry(\@symbols)), \@symbols);
+
+    is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols))), pack('C*', @symbols));
+    is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols), undef, \&delta_encode),             undef, \&delta_decode),             pack('C*', @symbols));
+    is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols), undef, \&elias_omega_encode),       undef, \&elias_omega_decode),       pack('C*', @symbols));
+    is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols), undef, \&fibonacci_encode),         undef, \&fibonacci_decode),         pack('C*', @symbols));
+    is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols), undef, \&elias_gamma_encode),       undef, \&elias_gamma_decode),       pack('C*', @symbols));
+    is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols), undef, \&create_ac_entry),          undef, \&decode_ac_entry),          pack('C*', @symbols));
+    is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols), undef, \&create_huffman_entry),     undef, \&decode_huffman_entry),     pack('C*', @symbols));
+    is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols), undef, \&create_adaptive_ac_entry), undef, \&decode_adaptive_ac_entry), pack('C*', @symbols));
+
+    is_deeply(lz77_decompress(lz77_compress(pack('C*', @symbols))), pack('C*', @symbols));
+    is_deeply(lz77_decompress(lz77_compress(pack('C*', @symbols), undef, \&create_ac_entry),          undef, \&decode_ac_entry),          pack('C*', @symbols));
+    is_deeply(lz77_decompress(lz77_compress(pack('C*', @symbols), undef, \&create_adaptive_ac_entry), undef, \&decode_adaptive_ac_entry), pack('C*', @symbols));
+
+    is_deeply(lzss_decompress(lzss_compress(pack('C*', @symbols))), pack('C*', @symbols));
+    is_deeply(lzss_decompress(lzss_compress(pack('C*', @symbols), undef, \&create_ac_entry),          undef, \&decode_ac_entry),          pack('C*', @symbols));
+    is_deeply(lzss_decompress(lzss_compress(pack('C*', @symbols), undef, \&create_adaptive_ac_entry), undef, \&decode_adaptive_ac_entry), pack('C*', @symbols));
+
+    is_deeply(bz2_decompress(bz2_compress(pack('C*', @symbols))), pack('C*', @symbols));
+    is_deeply(bz2_decompress(bz2_compress(pack('C*', @symbols), undef, \&create_ac_entry),          undef, \&decode_ac_entry),          pack('C*', @symbols));
+    is_deeply(bz2_decompress(bz2_compress(pack('C*', @symbols), undef, \&create_adaptive_ac_entry), undef, \&decode_adaptive_ac_entry), pack('C*', @symbols));
+
+    is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic(\@symbols)), \@symbols);
+    is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic(\@symbols, undef, \&create_ac_entry),          \&decode_ac_entry),          \@symbols);
+    is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic(\@symbols, undef, \&create_adaptive_ac_entry), \&decode_adaptive_ac_entry), \@symbols);
+
+    is_deeply(\@symbols, \@copy);    # make sure the array has not been modified in-place
 }
 
 ##################################

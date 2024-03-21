@@ -3,6 +3,7 @@ Changes
 examples/bzip2-like.pl
 examples/bzip2-like_ac_string.pl
 examples/bzip2-like_ac_string_symbolic.pl
+examples/bzip2-like_adaptive_ac_string.pl
 examples/bzip2-like_string.pl
 examples/bzip2-like_string_symbolic.pl
 examples/bzip2-like_symbolic.pl
@@ -28,12 +29,15 @@ META.yml
 README.md
 t/00.load.t
 t/bzip2.t
+t/bzip2_adaptive_arithmetic.t
+t/bzip2_adaptive_arithmetic_symbolic.t
 t/bzip2_arithmetic.t
 t/bzip2_arithmetic_symbolic.t
 t/bzip2_symbolic.t
 t/lz77.t
 t/lz77_arithmetic.t
 t/lzss.t
+t/lzss_adaptive_arithmetic.t
 t/lzss_arithmetic.t
 t/lzss_vs_lz77.t
 t/lzw.t
@@ -43,3 +47,5 @@ t/lzw_fibonacci.t
 t/misc.t
 t/pod-coverage.t
 t/pod.t
+utils/auto_perltidy.sh
+utils/bak_cleaner.sh

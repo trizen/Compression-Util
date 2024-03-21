@@ -9,11 +9,12 @@ require Exporter;
 our @ISA = qw(Exporter);
 
 our $VERBOSE = 0;        # verbose mode
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 # Arithmetic Coding settings
-use constant BITS => 32;
-use constant MAX  => oct('0b' . ('1' x BITS));
+use constant BITS         => 32;
+use constant MAX          => oct('0b' . ('1' x BITS));
+use constant INITIAL_FREQ => 1;
 
 our %EXPORT_TAGS = (
     'all' => [
@@ -49,8 +50,8 @@ our %EXPORT_TAGS = (
           mtf_encode
           mtf_decode
 
-          mtf_encode_alphabet
-          mtf_decode_alphabet
+          encode_alphabet
+          decode_alphabet
 
           run_length
 
@@ -86,6 +87,12 @@ our %EXPORT_TAGS = (
 
           create_ac_entry
           decode_ac_entry
+
+          adaptive_ac_encode
+          adaptive_ac_decode
+
+          create_adaptive_ac_entry
+          decode_adaptive_ac_entry
 
           abc_encode
           abc_decode
@@ -587,11 +594,11 @@ sub _create_cfreq ($freq) {
     return (\@cf, $T);
 }
 
-sub ac_encode ($bytes_arr) {
+sub ac_encode ($symbols) {
 
     my $enc        = '';
-    my $EOF_SYMBOL = (max(@$bytes_arr) // 0) + 1;
-    my @bytes      = (@$bytes_arr, $EOF_SYMBOL);
+    my $EOF_SYMBOL = (max(@$symbols) // 0) + 1;
+    my @bytes      = (@$symbols, $EOF_SYMBOL);
 
     my %freq;
     ++$freq{$_} for @bytes;
@@ -727,9 +734,9 @@ sub ac_decode ($fh, $freq) {
     return \@dec;
 }
 
-sub create_ac_entry ($bytes, $out_fh = undef) {
+sub create_ac_entry ($symbols, $out_fh = undef) {
 
-    my ($enc, $freq) = ac_encode($bytes);
+    my ($enc, $freq) = ac_encode($symbols);
     my $max_symbol = max(keys %$freq) // 0;
 
     my @freqs;
@@ -747,6 +754,11 @@ sub create_ac_entry ($bytes, $out_fh = undef) {
 
 sub decode_ac_entry ($fh) {
 
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
     my @freqs    = @{delta_decode($fh)};
     my $bits_len = pop(@freqs);
 
@@ -763,6 +775,210 @@ sub decode_ac_entry ($fh) {
     if ($bits_len > 0) {
         open my $bits_fh, '<:raw', \$bits;
         return ac_decode($bits_fh, \%freq);
+    }
+
+    return [];
+}
+
+#############################################
+# Adaptive Arithemtic Coding (in fixed bits)
+#############################################
+
+sub _create_adaptive_cfreq ($freq_value, $alphabet) {
+
+    my $T = 0;
+    my (@cf, @freq);
+
+    foreach my $i (@$alphabet) {
+        $freq[$i] = $freq_value;
+        $cf[$i]   = $T;
+        $T += $freq_value;
+        $cf[$i + 1] = $T;
+    }
+
+    return (\@freq, \@cf, $T);
+}
+
+sub _increment_freq ($c, $alphabet, $freq, $cf) {
+
+    ++$freq->[$c];
+    my $T = $cf->[$c];
+
+    foreach my $i (@$alphabet) {
+        next if ($i < $c);
+        $cf->[$i] = $T;
+        $T += $freq->[$i];
+        $cf->[$i + 1] = $T;
+    }
+
+    return $T;
+}
+
+sub adaptive_ac_encode ($symbols) {
+
+    my $enc      = '';
+    my @bytes    = (@$symbols, (max(@$symbols) // 0) + 1);
+    my $alphabet = [sort { $a <=> $b } uniq(@bytes)];
+
+    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet);
+
+    if ($T > MAX) {
+        die "Too few bits: $T > ${\MAX}";
+    }
+
+    my $low      = 0;
+    my $high     = MAX;
+    my $uf_count = 0;
+
+    foreach my $c (@bytes) {
+
+        my $w = $high - $low + 1;
+
+        $high = ($low + int(($w * $cf->[$c + 1]) / $T) - 1) & MAX;
+        $low  = ($low + int(($w * $cf->[$c]) / $T)) & MAX;
+
+        $T = _increment_freq($c, $alphabet, $freq, $cf);
+
+        if ($high > MAX) {
+            die "high > MAX: $high > ${\MAX}";
+        }
+
+        if ($low >= $high) { die "$low >= $high" }
+
+        while (1) {
+
+            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
+
+                my $bit = $high >> (BITS - 1);
+                $enc .= $bit;
+
+                if ($uf_count > 0) {
+                    $enc .= join('', 1 - $bit) x $uf_count;
+                    $uf_count = 0;
+                }
+
+                $low <<= 1;
+                ($high <<= 1) |= 1;
+            }
+            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
+                ($high <<= 1) |= (1 << (BITS - 1));
+                $high |= 1;
+                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
+                ++$uf_count;
+            }
+            else {
+                last;
+            }
+
+            $low  &= MAX;
+            $high &= MAX;
+        }
+    }
+
+    $enc .= '0';
+    $enc .= '1';
+
+    while (length($enc) % 8 != 0) {
+        $enc .= '1';
+    }
+
+    return ($enc, $alphabet);
+}
+
+sub adaptive_ac_decode ($fh, $alphabet) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $alphabet);
+    }
+
+    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet);
+
+    my @dec;
+    my $low        = 0;
+    my $high       = MAX;
+    my @alpha      = @$alphabet;
+    my $max_symbol = $alpha[-1];
+
+    my $enc = oct('0b' . join '', map { getc($fh) // 1 } 1 .. BITS);
+
+    while (1) {
+        my $w  = ($high + 1) - $low;
+        my $ss = int((($T * ($enc - $low + 1)) - 1) / $w);
+
+        my $i = 0;
+        foreach my $j (@alpha) {
+            if ($cf->[$j] <= $ss and $ss < $cf->[$j + 1]) {
+                $i = $j;
+                last;
+            }
+        }
+
+        last if ($i == $max_symbol);
+        push @dec, $i;
+
+        $high = ($low + int(($w * $cf->[$i + 1]) / $T) - 1) & MAX;
+        $low  = ($low + int(($w * $cf->[$i]) / $T)) & MAX;
+
+        $T = _increment_freq($i, $alphabet, $freq, $cf);
+
+        if ($high > MAX) {
+            die "high > MAX: ($high > ${\MAX})";
+        }
+
+        if ($low >= $high) { die "$low >= $high" }
+
+        while (1) {
+
+            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
+                ($high <<= 1) |= 1;
+                $low <<= 1;
+                ($enc <<= 1) |= (getc($fh) // 1);
+            }
+            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
+                ($high <<= 1) |= (1 << (BITS - 1));
+                $high |= 1;
+                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
+                $enc = (($enc >> (BITS - 1)) << (BITS - 1)) | (($enc & ((1 << (BITS - 2)) - 1)) << 1) | (getc($fh) // 1);
+            }
+            else {
+                last;
+            }
+
+            $low  &= MAX;
+            $high &= MAX;
+            $enc  &= MAX;
+        }
+    }
+
+    return \@dec;
+}
+
+sub create_adaptive_ac_entry ($symbols, $out_fh = undef) {
+
+    my ($enc, $alphabet) = adaptive_ac_encode($symbols);
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh pack('N', length($enc));
+    print $out_fh encode_alphabet($alphabet);
+    print $out_fh pack("B*", $enc);
+    return $out_str;
+}
+
+sub decode_adaptive_ac_entry ($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    my $enc_len  = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
+    my $alphabet = decode_alphabet($fh);
+
+    if ($enc_len > 0) {
+        my $bits = read_bits($fh, $enc_len);
+        open my $bits_fh, '<:raw', \$bits;
+        return adaptive_ac_decode($bits_fh, $alphabet);
     }
 
     return [];
@@ -899,7 +1115,7 @@ sub run_length ($arr, $max_run = undef) {
 
 sub binary_vrl_encode ($bitstring) {
 
-    my @bits   = split(//, $bitstring);
+    my @bits    = split(//, $bitstring);
     my $encoded = $bits[0];
 
     foreach my $rle (@{run_length(\@bits)}) {
@@ -1100,7 +1316,7 @@ sub _mtf_encode_alphabet_256 ($alphabet) {
         }
     }
 
-    my $delta = delta_encode([@marked], 1);
+    my $delta = delta_encode(\@marked, 1);
 
     $VERBOSE && say STDERR "Populated : ", sprintf('%08b', $populated);
     $VERBOSE && say STDERR "Marked    : @marked";
@@ -1202,7 +1418,7 @@ sub bwt_decode_symbolic ($bwt, $idx) {    # fast inversion
     return \@dec;
 }
 
-sub mtf_encode_alphabet ($alphabet) {
+sub encode_alphabet ($alphabet) {
 
     my $max_symbol = max(@$alphabet);
 
@@ -1214,7 +1430,12 @@ sub mtf_encode_alphabet ($alphabet) {
     return (chr(0) . delta_encode([reverse @$alphabet]));
 }
 
-sub mtf_decode_alphabet ($fh) {
+sub decode_alphabet ($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
 
     if (ord(getc($fh) // die "error") == 1) {
         return _mtf_decode_alphabet_256($fh);
@@ -1238,12 +1459,12 @@ sub bz2_compress_symbolic ($symbols, $out_fh = undef, $entropy_sub = \&create_hu
 
     my @bytes        = @$bwt;
     my @alphabet     = sort { $a <=> $b } uniq(@bytes);
-    my $alphabet_enc = mtf_encode_alphabet(\@alphabet);
+    my $alphabet_enc = encode_alphabet(\@alphabet);
 
     $VERBOSE && say STDERR "BWT index = $idx";
     $VERBOSE && say STDERR "Max symbol: ", max(@alphabet) // 0;
 
-    my $mtf = mtf_encode(\@bytes, [@alphabet]);
+    my $mtf = mtf_encode(\@bytes, \@alphabet);
     my $rle = zrle_encode($mtf);
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
@@ -1263,7 +1484,7 @@ sub bz2_decompress_symbolic ($fh, $entropy_sub = \&decode_huffman_entry) {
     }
 
     my $idx      = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
-    my $alphabet = mtf_decode_alphabet($fh);
+    my $alphabet = decode_alphabet($fh);
 
     $VERBOSE && say STDERR "BWT index = $idx";
     $VERBOSE && say STDERR "Alphabet size: ", scalar(@$alphabet);
@@ -1286,9 +1507,9 @@ sub bz2_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry
 
     my @bytes        = unpack('C*', $bwt);
     my @alphabet     = sort { $a <=> $b } uniq(@bytes);
-    my $alphabet_enc = mtf_encode_alphabet(\@alphabet);
+    my $alphabet_enc = encode_alphabet(\@alphabet);
 
-    my $mtf = mtf_encode(\@bytes, [@alphabet]);
+    my $mtf = mtf_encode(\@bytes, \@alphabet);
     my $rle = zrle_encode($mtf);
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
@@ -1308,7 +1529,7 @@ sub bz2_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry)
     }
 
     my $idx      = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
-    my $alphabet = mtf_decode_alphabet($fh);
+    my $alphabet = decode_alphabet($fh);
 
     $VERBOSE && say STDERR "BWT index = $idx";
     $VERBOSE && say STDERR "Alphabet size: ", scalar(@$alphabet);
@@ -1387,7 +1608,7 @@ sub lzss_encode ($str) {
     my @chars  = split(//, $str);
     my $end    = $#chars;
 
-    my $min_len = 3;                          # $LENGTH_SYMBOLS->[0][0];
+    my $min_len = 4;                          # $LENGTH_SYMBOLS->[0][0];
     my $max_len = $LENGTH_SYMBOLS->[-1][0];
 
     my %literal_freq;
@@ -1793,7 +2014,7 @@ This functionality is provided by the function C<bz2_compress()>, which can be e
 
     my @bytes        = unpack('C*', $bwt);
     my @alphabet     = sort { $a <=> $b } uniq(@bytes);
-    my $alphabet_enc = mtf_encode_alphabet(\@alphabet);
+    my $alphabet_enc = encode_alphabet(\@alphabet);
 
     my $mtf = mtf_encode(\@bytes, \@alphabet);
     my $rle = zrle_encode($mtf);
@@ -1846,6 +2067,9 @@ The encoding of input and output file-handles must be set to C<:raw>.
       create_ac_entry(\@symbols, $fh)      # Create an Arithmetic Coding block
       decode_ac_entry($fh)                 # Decode an Arithmetic Coding block
 
+      create_adaptive_ac_entry(\@symbols, $fh)  # Create an Adaptive Arithmetic Coding block
+      decode_adaptive_ac_entry($fh)             # Decode an Adaptive Arithmetic Coding block
+
       bz2_compress($string)                # Bzip2-like compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
       bz2_decompress($fh)                  # Inverse of the above method
 
@@ -1887,8 +2111,8 @@ The encoding of input and output file-handles must be set to C<:raw>.
       mtf_encode(\@symbols, \@alphabet)    # Move-to-front transform
       mtf_decode(\@mtf, \@alphabet)        # Inverse of the above method
 
-      mtf_encode_alphabet(\@alphabet)      # Encode the Move-to-front alphabet
-      mtf_decode_alphabet($fh)             # Decode the Move-to-front alphabet
+      encode_alphabet(\@alphabet)          # Encode an alphabet of symbols into a binary string
+      decode_alphabet($fh)                 # Inverse of the above method
 
       run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array
 
@@ -1900,6 +2124,9 @@ The encoding of input and output file-handles must be set to C<:raw>.
 
       ac_encode(\@symbols)                 # Arithmetic Coding applied on an array of symbols
       ac_decode($bitstring, \%freq)        # Inverse of the above method
+
+      adaptive_ac_encode(\@symbols)               # Adaptive Arithmetic Coding applied on an array of symbols
+      adaptive_ac_decode($bitstring, \@alphabet)  # Inverse of the above method
 
       lzw_encode($string)                  # LZW encoding of a given string
       lzw_decode(\@symbols)                # Inverse of the above method
@@ -1966,6 +2193,24 @@ When the second parameter is omitted, the function returns a binary string.
     my $symbols = decode_ac_entry($string);
 
 Inverse of C<create_ac_entry()>.
+
+=head2 create_adaptive_ac_entry
+
+    create_adaptive_ac_entry(\@symbols, $out_fh);        # writes to $out_fh
+    my $string = create_adaptive_ac_entry(\@symbols);    # returns a binary string
+
+High-level function that generates an Adaptive Arithmetic Coding block.
+
+It takes two parameters: C<\@symbols>, which represents the symbols to be encoded, and C<$out_fh>, which is optional, and represents the file-handle where to write the result.
+
+When the second parameter is omitted, the function returns a binary string.
+
+=head2 decode_adaptive_ac_entry
+
+    my $symbols = decode_adaptive_ac_entry($fh);
+    my $symbols = decode_adaptive_ac_entry($string);
+
+Inverse of C<create_adaptive_ac_entry()>.
 
 =head2 lz77_compress
 
@@ -2254,17 +2499,18 @@ It takes two parameters: C<\@symbols>, representing the sequence of symbols to b
 
 Inverse of C<mtf_encode()>.
 
-=head2 mtf_encode_alphabet
+=head2 encode_alphabet
 
-    my $string = mtf_encode_alphabet(\@alphabet);
+    my $string = encode_alphabet(\@alphabet);
 
-Efficienlty encodes the MTF alphabet into a string.
+Efficienlty encodes an alphabet of symbols into a binary string.
 
-=head2 mtf_decode_alphabet
+=head2 decode_alphabet
 
-    my $alphabet = mtf_decode_alphabet($fh);
+    my $alphabet = decode_alphabet($fh);
+    my $alphabet = decode_alphabet($string);
 
-Decodes the MTF alphabet, given a file-handle C<$fh>, returning an array of symbols.
+Decodes an encoded alphabet, given a file-handle or a binary string, returning an array of symbols. Inverse of C<encode_alphabet()>.
 
 =head2 run_length
 
@@ -2322,16 +2568,39 @@ Inverse of C<zrle_encode()>.
 
 Performs Arithmetic Coding on the provided symbols.
 
-It takes a single parameter, C<\@symbols>, representing the symbols to be encoded. The function returns two values: C<$bitstring>, which is a string of 1s and 0s, and C<$freq>, representing the frequency table used for encoding.
+It takes a single parameter, C<\@symbols>, representing the symbols to be encoded.
+
+The function returns two values: C<$bitstring>, which is a string of 1s and 0s, and C<$freq>, representing the frequency table used for encoding.
 
 =head2 ac_decode
 
     my $symbols = ac_decode($bits_fh, \%freq);
     my $symbols = ac_decode($bitstring, \%freq);
 
-Performs Arithmetic Coding decoding using the provided frequency table and a string of 1s and 0s.
+Performs Arithmetic Coding decoding using the provided frequency table and a string of 1s and 0s. Inverse of C<ac_encode()>.
 
 It takes two parameters: C<$bitstring>, representing a string of 1s and 0s containing the arithmetic coded data, and C<\%freq>, representing the frequency table used for encoding.
+
+The function returns the decoded sequence of symbols.
+
+=head2 adaptive_ac_encode
+
+    my ($bitstring, $alphabet) = adaptive_ac_encode(\@symbols);
+
+Performs Adaptive Arithmetic Coding on the provided symbols.
+
+It takes a single parameter, C<\@symbols>, representing the symbols to be encoded.
+
+The function returns two values: C<$bitstring>, which is a string of 1s and 0s, and C<$alphabet>, which is an array-ref of distinct sorted symbols.
+
+=head2 adaptive_ac_decode
+
+    my $symbols = adaptive_ac_decode($bits_fh, \@alphabet);
+    my $symbols = adaptive_ac_decode($bitstring, \@alphabet);
+
+Performs Adaptive Arithmetic Coding decoding using the provided frequency table and a string of 1s and 0s.
+
+It takes two parameters: C<$bitstring>, representing a string of 1s and 0s containing the adaptive arithmetic coded data, and C<\@alphabet>, representing the array of distinct sorted symbols that appear in the encoded data.
 
 The function returns the decoded sequence of symbols.
 
