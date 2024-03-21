@@ -52,6 +52,11 @@ our %EXPORT_TAGS = (
           mtf_encode_alphabet
           mtf_decode_alphabet
 
+          run_length
+
+          binary_vrl_encode
+          binary_vrl_decode
+
           rle4_encode
           rle4_decode
 
@@ -76,7 +81,6 @@ our %EXPORT_TAGS = (
           lz77_encode
           lz77_decode
 
-          _create_cfreq
           ac_encode
           ac_decode
 
@@ -88,6 +92,9 @@ our %EXPORT_TAGS = (
 
           fibonacci_encode
           fibonacci_decode
+
+          elias_gamma_encode
+          elias_gamma_decode
 
           elias_omega_encode
           elias_omega_decode
@@ -282,6 +289,47 @@ sub fibonacci_decode ($fh) {
     }
 
     return \@symbols;
+}
+
+#####################
+# Elias gamma coding
+#####################
+
+sub elias_gamma_encode ($integers) {
+
+    my $bitstring = '';
+    foreach my $k (scalar(@$integers), @$integers) {
+        my $t = sprintf('%b', $k + 1);
+        $bitstring .= ('1' x (length($t) - 1)) . '0' . substr($t, 1);
+    }
+
+    pack('B*', $bitstring);
+}
+
+sub elias_gamma_decode ($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    my @ints;
+    my $len    = 0;
+    my $buffer = '';
+
+    for (my $k = 0 ; $k <= $len ; ++$k) {
+
+        my $bl = 0;
+        ++$bl while (read_bit($fh, \$buffer) eq '1');
+
+        push @ints, oct('0b' . '1' . join('', map { read_bit($fh, \$buffer) } 1 .. $bl)) - 1;
+
+        if ($k == 0) {
+            $len = pop(@ints);
+        }
+    }
+
+    return \@ints;
 }
 
 #####################
@@ -815,6 +863,82 @@ sub bwt_decode ($bwt, $idx) {    # fast inversion
     }
 
     return $dec;
+}
+
+#####################
+# Generic run-length
+#####################
+
+sub run_length ($arr, $max_run = undef) {
+
+    @$arr || return [];
+
+    my @result     = [$arr->[0], 1];
+    my $prev_value = $arr->[0];
+
+    foreach my $i (1 .. $#$arr) {
+
+        my $curr_value = $arr->[$i];
+
+        if ($curr_value eq $prev_value and (defined($max_run) ? $result[-1][1] < $max_run : 1)) {
+            ++$result[-1][1];
+        }
+        else {
+            push(@result, [$curr_value, 1]);
+        }
+
+        $prev_value = $curr_value;
+    }
+
+    return \@result;
+}
+
+######################################
+# Binary variable run-length encoding
+######################################
+
+sub binary_vrl_encode ($bitstring) {
+
+    my @bits   = split(//, $bitstring);
+    my $encoded = $bits[0];
+
+    foreach my $rle (@{run_length(\@bits)}) {
+        my ($c, $v) = @$rle;
+
+        if ($v == 1) {
+            $encoded .= '0';
+        }
+        else {
+            my $t = sprintf('%b', $v - 1);
+            $encoded .= join('', '1' x length($t), '0', substr($t, 1));
+        }
+    }
+
+    return $encoded;
+}
+
+sub binary_vrl_decode ($bitstring) {
+
+    my $decoded = '';
+    my $bit     = substr($bitstring, 0, 1, '');
+
+    while ($bitstring ne '') {
+
+        $decoded .= $bit;
+
+        my $bl = 0;
+        while (substr($bitstring, 0, 1, '') eq '1') {
+            ++$bl;
+        }
+
+        if ($bl > 0) {
+            $decoded .= $bit x oct('0b1' . join('', map { substr($bitstring, 0, 1, '') } 1 .. $bl - 1));
+        }
+
+        $bit = ($bit eq '1' ? '0' : '1');
+    }
+
+    return $decoded;
 }
 
 #####################
@@ -1742,13 +1866,16 @@ The encoding of input and output file-handles must be set to C<:raw>.
       delta_encode(\@ints, $double=0)      # Delta encoding of an array of ints
       delta_decode($fh, $double=0)         # Inverse of the above method
 
-      fibonacci_encode(\@ints)             # Fibonacci coding of an array of non-negative ints
+      fibonacci_encode(\@symbols)          # Fibonacci coding of an array of symbols
       fibonacci_decode($fh)                # Inverse of the above method
 
-      elias_omega_encode(\@ints)           # Elias Omega coding method of an array non-negative ints
+      elias_gamma_encode(\@symbols)        # Elias Gamma coding method of an array of symbols
+      elias_gamma_decode($fh)              # Inverse of the above method
+
+      elias_omega_encode(\@symbols)        # Elias Omega coding method of an array of symbols
       elias_omega_decode($fh)              # Inverse of the above method
 
-      abc_encode(\@ints)                   # Adaptive Binary Concatenation method of an array of non-negative ints
+      abc_encode(\@symbols)                # Adaptive Binary Concatenation method of an array of symbols
       abc_decode($fh)                      # Inverse of the above method
 
       bwt_encode($string)                  # Burrows-Wheeler transform
@@ -1762,6 +1889,8 @@ The encoding of input and output file-handles must be set to C<:raw>.
 
       mtf_encode_alphabet(\@alphabet)      # Encode the Move-to-front alphabet
       mtf_decode_alphabet($fh)             # Decode the Move-to-front alphabet
+
+      run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array
 
       rle4_encode(\@symbols, $max=255)     # Run-length encoding with 4 or more consecutive characters
       rle4_decode(\@rle4)                  # Inverse of the above method
@@ -1778,7 +1907,10 @@ The encoding of input and output file-handles must be set to C<:raw>.
 =head1 LOW-LEVEL FUNCTIONS
 
       read_bit($fh, \$buffer)              # Read one bit from file-handle
-      read_bits($fh, $len)                 # Read $len bits from file-handle
+      read_bits($fh, $len)                 # Read `$len` bits from file-handle
+
+      binary_vrl_encode($bitstring)        # Binary variable run-length encoding
+      binary_vrl_decode($bitstring)        # Binary variable run-length decoding
 
       bwt_sort($string)                    # Burrows-Wheeler sorting
       bwt_sort_symbolic(\@symbols)         # Burrows-Wheeler sorting, applied on an array of symbols
@@ -2017,6 +2149,22 @@ Encodes a sequence of non-negative integers using Fibonacci coding, returning a 
 
 Inverse of C<fibonacci_encode()>.
 
+=head2 elias_gamma_encode
+
+    my $string = elias_gamma_encode(\@symbols);
+
+Encodes a sequence of non-negative integers using Elias Gamma coding, returning a binary string.
+
+=head2 elias_gamma_decode
+
+    # Given a file-handle
+    my $symbols = elias_gamma_decode($fh);
+
+    # Given a binary string
+    my $symbols = elias_gamma_decode($string);
+
+Inverse of C<elias_gamma_encode()>.
+
 =head2 elias_omega_encode
 
     my $string = elias_omega_encode(\@symbols);
@@ -2044,12 +2192,12 @@ This method is particularly effective for encoding a sequence of integers that a
 =head2 abc_decode
 
     # Given a filehandle
-    my $nonnegative_integers = abc_decode($fh);
+    my $symbols = abc_decode($fh);
 
     # Given a binary string
-    my $nonnegative_integers = abc_decode($string);
+    my $symbols = abc_decode($string);
 
-Inverse of C<abc_decode()>.
+Inverse of C<abc_encode()>.
 
 =head2 bwt_encode
 
@@ -2118,14 +2266,29 @@ Efficienlty encodes the MTF alphabet into a string.
 
 Decodes the MTF alphabet, given a file-handle C<$fh>, returning an array of symbols.
 
+=head2 run_length
+
+    my $rl = run_length(\@symbols);
+    my $rl = run_length(\@symbols, $max_run);
+
+Performs Run-Length Encoding (RLE) on a sequence of symbolic elements.
+
+It takes two parameters: C<\@symbols>, representing an array of symbols, and C<$max_run>, indicating the maximum run length allowed.
+
+The function returns a 2D-array, with pairs: C<[symbol, run_length]>, such that the following code reconstructs the C<\@symbols> array:
+
+    my @symbols = map { ($_->[0]) x $_->[1] } @$rl;
+
+By default, the maximum run-length is unlimited.
+
 =head2 rle4_encode
 
-    my $rle4 = rle4_encode($symbols);
-    my $rle4 = rle4_encode($symbols, $max_run);
+    my $rle4 = rle4_encode(\@symbols);
+    my $rle4 = rle4_encode(\@symbols, $max_run);
 
 Performs Run-Length Encoding (RLE) on a sequence of symbolic elements, specifically designed for runs of four or more consecutive symbols.
 
-It takes two parameters: C<$symbols>, representing an array of symbols, and C<$max_run>, indicating the maximum run length allowed during encoding.
+It takes two parameters: C<\@symbols>, representing an array of symbols, and C<$max_run>, indicating the maximum run length allowed during encoding.
 
 The function returns the encoded RLE sequence as an array-ref of symbols.
 
@@ -2200,9 +2363,21 @@ The function stores the extra bits inside the C<$buffer>, reading one character 
 
 =head2 read_bits
 
-    my $bits = read_bits($fh, $bits_len);
+    my $bitstring = read_bits($fh, $bits_len);
 
 Reads a specified number of bits (C<$bits_len>) from a file-handle (C<$fh>) and returns them as a string.
+
+=head2 binary_vrl_encode
+
+    my $bitstring_enc = binary_vrl_encode($bitstring);
+
+Given a string of 1s and 0s, returns back a bitstring of 1s and 0s encoded using variable run-length encoding.
+
+=head2 binary_vrl_decode
+
+    my $bitstring = binary_vrl_decode($bitstring_enc);
+
+Given an encoded bitstring, returned by C<binary_vrl_encode()>, gives back the decoded string of 1s and 0s.
 
 =head2 bwt_sort
 

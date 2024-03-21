@@ -33,7 +33,6 @@ my $builder = Module::Build->new(
     requires => {
                  'perl'       => '5.36.0',
                  'Test::More' => 0,
-                 'version'    => 0,
                  'List::Util' => '1.45',
                  'Exporter'   => 0,
                  'POSIX'      => 0,

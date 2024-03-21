@@ -23,7 +23,6 @@ requires:
   POSIX: '0'
   Test::More: '0'
   perl: v5.36.0
-  version: '0'
 resources:
   bugtracker: https://github.com/trizen/Compression-Util/issues
   homepage: https://github.com/trizen/Compression-Util

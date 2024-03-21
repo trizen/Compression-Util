@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# LZWW compressor/decompressor + Delta coding, for compressing a given string.
+# LZWW compressor/decompressor + Elias Gamma coding, for compressing a given string.
 
 use 5.036;
 use lib               qw(../lib);
@@ -18,8 +18,8 @@ foreach my $file (__FILE__, $^X) {
         <$fh>;
     };
 
-    my $enc = lzw_compress($str, undef, \&delta_encode);
-    my $dec = lzw_decompress($enc, undef, \&delta_decode);
+    my $enc = lzw_compress($str, undef, \&elias_gamma_encode);
+    my $dec = lzw_decompress($enc, undef, \&elias_gamma_decode);
 
     say "Original size  : ", length($str);
     say "Compressed size: ", length($enc);

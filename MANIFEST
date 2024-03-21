@@ -16,7 +16,8 @@ examples/lzss_vs_lz77.pl
 examples/lzw.pl
 examples/lzw_string.pl
 examples/lzw_string_delta.pl
-examples/lzw_string_elias.pl
+examples/lzw_string_elias_gamma.pl
+examples/lzw_string_elias_omega.pl
 examples/lzw_string_fibonacci.pl
 lib/Compression/Util.pm
 LICENSE
@@ -36,7 +37,9 @@ t/lzss.t
 t/lzss_arithmetic.t
 t/lzss_vs_lz77.t
 t/lzw.t
-t/lzw_elias.t
+t/lzw_elias_gamma.t
+t/lzw_elias_omega.t
 t/lzw_fibonacci.t
+t/misc.t
 t/pod-coverage.t
 t/pod.t

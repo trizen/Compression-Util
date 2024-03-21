@@ -1,5 +1,11 @@
 Revision history for Compression-Util
 
+0.02    2024-??-??
+
+        - Added the run_length() function.
+        - Added the binary_vrl_encode() and binary_vrl_decode() functions.
+        - Added the elias_gamma_encode() and elias_gamma_decode() functions.
+
 0.01    2024-03-21
 
         - Initial release.

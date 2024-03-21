@@ -9,8 +9,7 @@ WriteMakefile
                    'Exporter' => 0,
                    'List::Util' => '1.45',
                    'POSIX' => 0,
-                   'Test::More' => 0,
-                   'version' => 0
+                   'Test::More' => 0
                  },
   'INSTALLDIRS' => 'site',
   'EXE_FILES' => [],
