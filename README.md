@@ -55,7 +55,7 @@ my ($bwt, $idx) = bwt_encode(pack('C*', @$rle4));
 
 my @bytes        = unpack('C*', $bwt);
 my @alphabet     = sort { $a <=> $b } uniq(@bytes);
-my $alphabet_enc = mtf_encode_alphabet(\@alphabet);
+my $alphabet_enc = encode_alphabet(\@alphabet);
 
 my $mtf = mtf_encode(\@bytes, \@alphabet);
 my $rle = zrle_encode($mtf);
@@ -110,6 +110,9 @@ The encoding of input and output file-handles must be set to `:raw`.
       create_ac_entry(\@symbols, $fh)      # Create an Arithmetic Coding block
       decode_ac_entry($fh)                 # Decode an Arithmetic Coding block
 
+      create_adaptive_ac_entry(\@symbols, $fh)  # Create an Adaptive Arithmetic Coding block
+      decode_adaptive_ac_entry($fh)             # Decode an Adaptive Arithmetic Coding block
+
       bz2_compress($string)                # Bzip2-like compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
       bz2_decompress($fh)                  # Inverse of the above method
 
@@ -132,13 +135,16 @@ The encoding of input and output file-handles must be set to `:raw`.
       delta_encode(\@ints, $double=0)      # Delta encoding of an array of ints
       delta_decode($fh, $double=0)         # Inverse of the above method
 
-      fibonacci_encode(\@ints)             # Fibonacci coding of an array of non-negative ints
+      fibonacci_encode(\@symbols)          # Fibonacci coding of an array of symbols
       fibonacci_decode($fh)                # Inverse of the above method
 
-      elias_omega_encode(\@ints)           # Elias Omega coding method of an array non-negative ints
+      elias_gamma_encode(\@symbols)        # Elias Gamma coding method of an array of symbols
+      elias_gamma_decode($fh)              # Inverse of the above method
+
+      elias_omega_encode(\@symbols)        # Elias Omega coding method of an array of symbols
       elias_omega_decode($fh)              # Inverse of the above method
 
-      abc_encode(\@ints)                   # Adaptive Binary Concatenation method of an array of non-negative ints
+      abc_encode(\@symbols)                # Adaptive Binary Concatenation method of an array of symbols
       abc_decode($fh)                      # Inverse of the above method
 
       bwt_encode($string)                  # Burrows-Wheeler transform
@@ -150,8 +156,10 @@ The encoding of input and output file-handles must be set to `:raw`.
       mtf_encode(\@symbols, \@alphabet)    # Move-to-front transform
       mtf_decode(\@mtf, \@alphabet)        # Inverse of the above method
 
-      mtf_encode_alphabet(\@alphabet)      # Encode the Move-to-front alphabet
-      mtf_decode_alphabet($fh)             # Decode the Move-to-front alphabet
+      encode_alphabet(\@alphabet)          # Encode an alphabet of symbols into a binary string
+      decode_alphabet($fh)                 # Inverse of the above method
+
+      run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array
 
       rle4_encode(\@symbols, $max=255)     # Run-length encoding with 4 or more consecutive characters
       rle4_decode(\@rle4)                  # Inverse of the above method
@@ -162,6 +170,9 @@ The encoding of input and output file-handles must be set to `:raw`.
       ac_encode(\@symbols)                 # Arithmetic Coding applied on an array of symbols
       ac_decode($bitstring, \%freq)        # Inverse of the above method
 
+      adaptive_ac_encode(\@symbols)               # Adaptive Arithmetic Coding applied on an array of symbols
+      adaptive_ac_decode($bitstring, \@alphabet)  # Inverse of the above method
+
       lzw_encode($string)                  # LZW encoding of a given string
       lzw_decode(\@symbols)                # Inverse of the above method
 ```
@@ -169,8 +180,11 @@ The encoding of input and output file-handles must be set to `:raw`.
 # LOW-LEVEL FUNCTIONS
 
 ```perl
-      read_bit($fh, \$buffer)              # Read one bit from filehandle
-      read_bits($fh, $len)                 # Read $len bits from filehandle
+      read_bit($fh, \$buffer)              # Read one bit from file-handle
+      read_bits($fh, $len)                 # Read `$len` bits from file-handle
+
+      binary_vrl_encode($bitstring)        # Binary variable run-length encoding
+      binary_vrl_decode($bitstring)        # Binary variable run-length decoding
 
       bwt_sort($string)                    # Burrows-Wheeler sorting
       bwt_sort_symbolic(\@symbols)         # Burrows-Wheeler sorting, applied on an array of symbols
@@ -236,10 +250,32 @@ When the second parameter is omitted, the function returns a binary string.
 
 Inverse of `create_ac_entry()`.
 
+## create\_adaptive\_ac\_entry
+
+```perl
+    create_adaptive_ac_entry(\@symbols, $out_fh);        # writes to $out_fh
+    my $string = create_adaptive_ac_entry(\@symbols);    # returns a binary string
+```
+
+High-level function that generates an Adaptive Arithmetic Coding block.
+
+It takes two parameters: `\@symbols`, which represents the symbols to be encoded, and `$out_fh`, which is optional, and represents the file-handle where to write the result.
+
+When the second parameter is omitted, the function returns a binary string.
+
+## decode\_adaptive\_ac\_entry
+
+```perl
+    my $symbols = decode_adaptive_ac_entry($fh);
+    my $symbols = decode_adaptive_ac_entry($string);
+```
+
+Inverse of `create_adaptive_ac_entry()`.
+
 ## lz77\_compress
 
 ```perl
-    lz77_compress($data, $out_fh);       # writes to filehandle
+    lz77_compress($data, $out_fh);       # writes to file-handle
     my $string = lz77_compress($data);   # returns a binary string
 ```
 
@@ -254,11 +290,11 @@ It takes a single parameter, `$data`, representing the data string to be compres
 
 ```perl
     # With Huffman coding
-    lzss_compress($data, $out_fh);       # writes to filehandle
+    lzss_compress($data, $out_fh);       # writes to file-handle
     my $string = lzss_compress($data);   # returns a binary string
 
     # With Arithmetic Coding
-    lzss_compress($data, $out_fh, \&create_ac_entry);              # writes to filehandle
+    lzss_compress($data, $out_fh, \&create_ac_entry);              # writes to file-handle
     my $string = lzss_compress($data, undef, \&create_ac_entry);   # returns a binary string
 ```
 
@@ -272,11 +308,11 @@ It takes a single parameter, `$data`, representing the data string to be compres
 ## lz77\_decompress / lzss\_decompress
 
 ```perl
-    # Writing to filehandle
+    # Writing to file-handle
     lzss_decompress($fh, $out_fh);
     lzss_decompress($string, $out_fh);
 
-    # Writing to filehandle (does Arithmetic decoding)
+    # Writing to file-handle (does Arithmetic decoding)
     lzss_decompress($fh, $out_fh, \&decode_ac_entry);
     lzss_decompress($string, $out_fh, \&decode_ac_entry);
 
@@ -294,7 +330,7 @@ Inverse of `lzss_compress()` and `lz77_compress()`.
 ## lzw\_compress
 
 ```perl
-    lzw_compress($data, $out_fh);       # writes to filehandle
+    lzw_compress($data, $out_fh);       # writes to file-handle
     my $string = lzw_compress($data);   # returns a binary string
 ```
 
@@ -444,6 +480,26 @@ Encodes a sequence of non-negative integers using Fibonacci coding, returning a 
 
 Inverse of `fibonacci_encode()`.
 
+## elias\_gamma\_encode
+
+```perl
+    my $string = elias_gamma_encode(\@symbols);
+```
+
+Encodes a sequence of non-negative integers using Elias Gamma coding, returning a binary string.
+
+## elias\_gamma\_decode
+
+```perl
+    # Given a file-handle
+    my $symbols = elias_gamma_decode($fh);
+
+    # Given a binary string
+    my $symbols = elias_gamma_decode($string);
+```
+
+Inverse of `elias_gamma_encode()`.
+
 ## elias\_omega\_encode
 
 ```perl
@@ -478,13 +534,13 @@ This method is particularly effective for encoding a sequence of integers that a
 
 ```perl
     # Given a filehandle
-    my $nonnegative_integers = abc_decode($fh);
+    my $symbols = abc_decode($fh);
 
     # Given a binary string
-    my $nonnegative_integers = abc_decode($string);
+    my $symbols = abc_decode($string);
 ```
 
-Inverse of `abc_decode()`.
+Inverse of `abc_encode()`.
 
 ## bwt\_encode
 
@@ -553,32 +609,52 @@ It takes two parameters: `\@symbols`, representing the sequence of symbols to be
 
 Inverse of `mtf_encode()`.
 
-## mtf\_encode\_alphabet
+## encode\_alphabet
 
 ```perl
-    my $string = mtf_encode_alphabet(\@alphabet);
+    my $string = encode_alphabet(\@alphabet);
 ```
 
-Efficienlty encodes the MTF alphabet into a string.
+Efficienlty encodes an alphabet of symbols into a binary string.
 
-## mtf\_decode\_alphabet
+## decode\_alphabet
 
 ```perl
-    my $alphabet = mtf_decode_alphabet($fh);
+    my $alphabet = decode_alphabet($fh);
+    my $alphabet = decode_alphabet($string);
 ```
 
-Decodes the MTF alphabet, given a file-handle `$fh`, returning an array of symbols.
+Decodes an encoded alphabet, given a file-handle or a binary string, returning an array of symbols. Inverse of `encode_alphabet()`.
+
+## run\_length
+
+```perl
+    my $rl = run_length(\@symbols);
+    my $rl = run_length(\@symbols, $max_run);
+```
+
+Performs Run-Length Encoding (RLE) on a sequence of symbolic elements.
+
+It takes two parameters: `\@symbols`, representing an array of symbols, and `$max_run`, indicating the maximum run length allowed.
+
+The function returns a 2D-array, with pairs: `[symbol, run_length]`, such that the following code reconstructs the `\@symbols` array:
+
+```perl
+    my @symbols = map { ($_->[0]) x $_->[1] } @$rl;
+```
+
+By default, the maximum run-length is unlimited.
 
 ## rle4\_encode
 
 ```perl
-    my $rle4 = rle4_encode($symbols);
-    my $rle4 = rle4_encode($symbols, $max_run);
+    my $rle4 = rle4_encode(\@symbols);
+    my $rle4 = rle4_encode(\@symbols, $max_run);
 ```
 
 Performs Run-Length Encoding (RLE) on a sequence of symbolic elements, specifically designed for runs of four or more consecutive symbols.
 
-It takes two parameters: `$symbols`, representing an array of symbols, and `$max_run`, indicating the maximum run length allowed during encoding.
+It takes two parameters: `\@symbols`, representing an array of symbols, and `$max_run`, indicating the maximum run length allowed during encoding.
 
 The function returns the encoded RLE sequence as an array-ref of symbols.
 
@@ -620,7 +696,9 @@ Inverse of `zrle_encode()`.
 
 Performs Arithmetic Coding on the provided symbols.
 
-It takes a single parameter, `\@symbols`, representing the symbols to be encoded. The function returns two values: `$bitstring`, which is a string of 1s and 0s, and `$freq`, representing the frequency table used for encoding.
+It takes a single parameter, `\@symbols`, representing the symbols to be encoded.
+
+The function returns two values: `$bitstring`, which is a string of 1s and 0s, and `$freq`, representing the frequency table used for encoding.
 
 ## ac\_decode
 
@@ -629,9 +707,34 @@ It takes a single parameter, `\@symbols`, representing the symbols to be encoded
     my $symbols = ac_decode($bitstring, \%freq);
 ```
 
-Performs Arithmetic Coding decoding using the provided frequency table and a string of 1s and 0s.
+Performs Arithmetic Coding decoding using the provided frequency table and a string of 1s and 0s. Inverse of `ac_encode()`.
 
 It takes two parameters: `$bitstring`, representing a string of 1s and 0s containing the arithmetic coded data, and `\%freq`, representing the frequency table used for encoding.
+
+The function returns the decoded sequence of symbols.
+
+## adaptive\_ac\_encode
+
+```perl
+    my ($bitstring, $alphabet) = adaptive_ac_encode(\@symbols);
+```
+
+Performs Adaptive Arithmetic Coding on the provided symbols.
+
+It takes a single parameter, `\@symbols`, representing the symbols to be encoded.
+
+The function returns two values: `$bitstring`, which is a string of 1s and 0s, and `$alphabet`, which is an array-ref of distinct sorted symbols.
+
+## adaptive\_ac\_decode
+
+```perl
+    my $symbols = adaptive_ac_decode($bits_fh, \@alphabet);
+    my $symbols = adaptive_ac_decode($bitstring, \@alphabet);
+```
+
+Performs Adaptive Arithmetic Coding decoding using the provided frequency table and a string of 1s and 0s.
+
+It takes two parameters: `$bitstring`, representing a string of 1s and 0s containing the adaptive arithmetic coded data, and `\@alphabet`, representing the array of distinct sorted symbols that appear in the encoded data.
 
 The function returns the decoded sequence of symbols.
 
@@ -670,10 +773,26 @@ The function stores the extra bits inside the `$buffer`, reading one character a
 ## read\_bits
 
 ```perl
-    my $bits = read_bits($fh, $bits_len);
+    my $bitstring = read_bits($fh, $bits_len);
 ```
 
 Reads a specified number of bits (`$bits_len`) from a file-handle (`$fh`) and returns them as a string.
+
+## binary\_vrl\_encode
+
+```perl
+    my $bitstring_enc = binary_vrl_encode($bitstring);
+```
+
+Given a string of 1s and 0s, returns back a bitstring of 1s and 0s encoded using variable run-length encoding.
+
+## binary\_vrl\_decode
+
+```perl
+    my $bitstring = binary_vrl_decode($bitstring_enc);
+```
+
+Given an encoded bitstring, returned by `binary_vrl_encode()`, gives back the decoded string of 1s and 0s.
 
 ## bwt\_sort
 
