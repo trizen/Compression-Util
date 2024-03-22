@@ -1,5 +1,11 @@
 Revision history for Compression-Util
 
+0.04    2024-??-??
+
+        [CHANGES]
+
+        - Simplified deflate_encode() to always return a binary string (no longer writes to a file-handle).
+
 0.03    2024-03-22
 
         [ADDITIONS]

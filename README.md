@@ -983,18 +983,14 @@ The function returns the decompressed data as a string.
 ## deflate\_encode
 
 ```perl
-    # Writes to file-handle
-    deflate_encode(\@literals, \@distances, \@lengths, $out_fh);
-    deflate_encode(\@literals, \@distances, \@lengths, $out_fh, \&create_ac_entry);
-
     # Returns a binary string
     my $string = deflate_encode(\@literals, \@distances, \@lengths);
-    my $string = deflate_encode(\@literals, \@distances, \@lengths, undef, \&create_ac_entry);
+    my $string = deflate_encode(\@literals, \@distances, \@lengths, \&create_ac_entry);
 ```
 
 Low-level function that encodes the results returned by `lz77_encode()` and `lzss_encode()`, using a DEFLATE-like approach, combined with Huffman coding.
 
-A sixth optional argument can be provided as `\&create_ac_entry` to use Arithmetic Coding instead of Huffman coding. The default value is `\&create_huffman_entry`.
+An optional argument can be provided as `\&create_ac_entry` to use Arithmetic Coding instead of Huffman coding. The default value is `\&create_huffman_entry`.
 
 ## deflate\_decode
 

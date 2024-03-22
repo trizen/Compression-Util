@@ -1819,7 +1819,7 @@ sub lzw_decode ($compressed) {
 # DEFLATE-like encoding of literals and backreferences produced by the LZ77/lZSS methods
 #########################################################################################
 
-sub deflate_encode ($literals, $distances, $lengths, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
+sub deflate_encode ($literals, $distances, $lengths, $entropy_sub = \&create_huffman_entry) {
 
     my $size = max(@$distances);
     my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables($size);
@@ -1858,7 +1858,7 @@ sub deflate_encode ($literals, $distances, $lengths, $out_fh = undef, $entropy_s
         }
     }
 
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    open my $out_fh, '>:raw', \my $out_str;
     print $out_fh pack('N', $size);
     $entropy_sub->(\@len_symbols,  $out_fh);
     $entropy_sub->(\@dist_symbols, $out_fh);
@@ -1981,7 +1981,7 @@ sub lzss_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entr
     my ($literals, $indices, $lengths) = lzss_encode($chunk);
     $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$indices)));
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    deflate_encode($literals, $indices, $lengths, $out_fh, $entropy_sub);
+    print $out_fh deflate_encode($literals, $indices, $lengths, $entropy_sub);
     return $out_str;
 }
 
@@ -1989,7 +1989,7 @@ sub lz77_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entr
     my ($literals, $indices, $lengths) = lz77_encode($chunk);
     $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$indices)));
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    deflate_encode($literals, $indices, $lengths, $out_fh, $entropy_sub);
+    print $out_fh deflate_encode($literals, $indices, $lengths, $entropy_sub);
     return $out_str;
 }
 
@@ -2910,17 +2910,13 @@ The function returns the decompressed data as a string.
 
 =head2 deflate_encode
 
-    # Writes to file-handle
-    deflate_encode(\@literals, \@distances, \@lengths, $out_fh);
-    deflate_encode(\@literals, \@distances, \@lengths, $out_fh, \&create_ac_entry);
-
     # Returns a binary string
     my $string = deflate_encode(\@literals, \@distances, \@lengths);
-    my $string = deflate_encode(\@literals, \@distances, \@lengths, undef, \&create_ac_entry);
+    my $string = deflate_encode(\@literals, \@distances, \@lengths, \&create_ac_entry);
 
 Low-level function that encodes the results returned by C<lz77_encode()> and C<lzss_encode()>, using a DEFLATE-like approach, combined with Huffman coding.
 
-A sixth optional argument can be provided as C<\&create_ac_entry> to use Arithmetic Coding instead of Huffman coding. The default value is C<\&create_huffman_entry>.
+An optional argument can be provided as C<\&create_ac_entry> to use Arithmetic Coding instead of Huffman coding. The default value is C<\&create_huffman_entry>.
 
 =head2 deflate_decode
 
