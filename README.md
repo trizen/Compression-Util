@@ -198,8 +198,8 @@ The encoding of input and output file-handles must be set to `:raw`.
       lzss_encode($string)                 # LZSS compression of a string into literals, indices and lengths
       lz77_decode(\@lits, \@idxs, \@lens)  # Inverse of the above two methods
 
-      deflate_encode($size, ...)           # DEFLATE-like encoding of values returned by lzss_encode()
-      deflate_decode($fh)                  # Inverse of the above method
+      deflate_encode(\@lits, \@idxs, \@lens)  # DEFLATE-like encoding of values returned by lzss_encode()
+      deflate_decode($fh)                     # Inverse of the above method
 ```
 
 # INTERFACE FOR HIGH-LEVEL FUNCTIONS
@@ -669,12 +669,12 @@ Inverse of `rle4_encode()`.
 ## zrle\_encode
 
 ```perl
-    my $zrle = zrle_encode($symbols);
+    my $zrle = zrle_encode(\@symbols);
 ```
 
 Performs Zero-Run-Length Encoding (ZRLE) on a sequence of symbolic elements.
 
-It takes a single parameter `$symbols`, representing the sequence of symbols to be encoded, and returns the encoded ZRLE sequence as an array-ref of symbols.
+It takes a single parameter `\@symbols`, representing the sequence of symbols to be encoded, and returns the encoded ZRLE sequence as an array-ref of symbols.
 
 This function efficiently encodes only runs of zeros, but also increments each symbol by `1`.
 
@@ -902,12 +902,12 @@ The function returns the decompressed data as a string.
 
 ```perl
     # Writes to file-handle
-    deflate_encode($size, \@literals, \@distances, \@lengths, $out_fh);
-    deflate_encode($size, \@literals, \@distances, \@lengths, $out_fh, \&create_ac_entry);
+    deflate_encode(\@literals, \@distances, \@lengths, $out_fh);
+    deflate_encode(\@literals, \@distances, \@lengths, $out_fh, \&create_ac_entry);
 
     # Returns a binary string
-    my $string = deflate_encode($size, \@literals, \@distances, \@lengths);
-    my $string = deflate_encode($size, \@literals, \@distances, \@lengths, undef, \&create_ac_entry);
+    my $string = deflate_encode(\@literals, \@distances, \@lengths);
+    my $string = deflate_encode(\@literals, \@distances, \@lengths, undef, \&create_ac_entry);
 ```
 
 Low-level function that encodes the results returned by `lz77_encode()` and `lzss_encode()`, using a DEFLATE-like approach, combined with Huffman coding.
