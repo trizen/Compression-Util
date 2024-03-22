@@ -9,7 +9,7 @@ require Exporter;
 our @ISA = qw(Exporter);
 
 our $VERBOSE = 0;        # verbose mode
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 # Arithmetic Coding settings
 use constant BITS         => 32;
@@ -105,6 +105,12 @@ our %EXPORT_TAGS = (
 
           elias_omega_encode
           elias_omega_decode
+
+          obh_encode
+          obh_decode
+
+          lzhd_compress
+          lzhd_decompress
 
           lzw_encode
           lzw_decode
@@ -1809,6 +1815,10 @@ sub lzw_decode ($compressed) {
     return $result;
 }
 
+#########################################################################################
+# DEFLATE-like encoding of literals and backreferences produced by the LZ77/lZSS methods
+#########################################################################################
+
 sub deflate_encode ($literals, $distances, $lengths, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
 
     my $size = max(@$distances);
@@ -1905,6 +1915,68 @@ sub deflate_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
     return (\@literals, \@distances, \@lengths);
 }
 
+################################################################
+# Encode a list of symbols, using offset bits and huffman coding
+#################################################################
+
+sub obh_encode ($distances, $entropy_sub = \&create_huffman_entry) {
+
+    my $size = max(@$distances);
+    my ($DISTANCE_SYMBOLS) = make_deflate_tables($size);
+
+    my @symbols;
+    my $offset_bits = '';
+
+    foreach my $dist (@$distances) {
+
+        my $i = find_deflate_index($dist, $DISTANCE_SYMBOLS);
+        my ($min, $bits) = @{$DISTANCE_SYMBOLS->[$i]};
+
+        push @symbols, $i;
+
+        if ($bits > 0) {
+            $offset_bits .= sprintf('%0*b', $bits, $dist - $min);
+        }
+    }
+
+    open my $out_fh, '>:raw', \my $out_str;
+    print $out_fh pack('N', $size);
+    $entropy_sub->(\@symbols, $out_fh);
+    print $out_fh pack('B*', $offset_bits);
+    return $out_str;
+}
+
+sub obh_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $entropy_sub);
+    }
+
+    my $size = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
+    my ($DISTANCE_SYMBOLS) = make_deflate_tables($size);
+
+    my $symbols  = $entropy_sub->($fh);
+    my $bits_len = 0;
+
+    foreach my $i (@$symbols) {
+        $bits_len += $DISTANCE_SYMBOLS->[$i][1];
+    }
+
+    my $bits = read_bits($fh, $bits_len);
+
+    my @distances;
+    foreach my $i (@$symbols) {
+        push @distances, $DISTANCE_SYMBOLS->[$i][0] + oct('0b' . substr($bits, 0, $DISTANCE_SYMBOLS->[$i][1], ''));
+    }
+
+    return \@distances;
+}
+
+###################
+# LZSS Compression
+###################
+
 sub lzss_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
     my ($literals, $indices, $lengths) = lzss_encode($chunk);
     $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$indices)));
@@ -1935,6 +2007,32 @@ sub lz77_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry
 }
 
 *lzss_decompress = \&lz77_decompress;
+
+sub lzhd_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
+    my ($literals, $indices, $lengths) = lz77_encode($chunk);
+    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (4 * scalar(@$literals)));
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    $entropy_sub->($literals, $out_fh);
+    $entropy_sub->($lengths,  $out_fh);
+    print $out_fh obh_encode($indices, $entropy_sub);
+    return $out_str;
+}
+
+sub lzhd_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $out_fh, $entropy_sub);
+    }
+
+    my $literals = $entropy_sub->($fh);
+    my $lengths  = $entropy_sub->($fh);
+    my $indices  = obh_decode($fh, $entropy_sub);
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh lz77_decode($literals, $indices, $lengths);
+    return $out_str;
+}
 
 sub lzw_compress ($chunk, $out_fh = undef, $enc_method = \&abc_encode) {
     $out_fh // open $out_fh, '>:raw', \my $out_str;
@@ -2080,6 +2178,9 @@ The encoding of input and output file-handles must be set to C<:raw>.
       lzss_compress($string)               # LZSS + DEFLATE-like encoding of indices and lengths
       lzss_decompress($fh)                 # Inverse of the above method
 
+      lzhd_compress($string)               # LZ77 + Huffman coding of lengths and literals + OBH for indices
+      lzhd_decompress($fh)                 # Inverse of the above method
+
       lzw_compress($string)                # LZW + abc_encode() compression
       lzw_decompress($fh)                  # Inverse of the above method
 
@@ -2099,6 +2200,9 @@ The encoding of input and output file-handles must be set to C<:raw>.
 
       abc_encode(\@symbols)                # Adaptive Binary Concatenation method of an array of symbols
       abc_decode($fh)                      # Inverse of the above method
+
+      obh_encode(\@symbols)                # Offset bits + Huffman coding of an array of symbols
+      obh_decode($fh)                      # Inverse of the above method
 
       bwt_encode($string)                  # Burrows-Wheeler transform
       bwt_decode($bwt, $idx)               # Inverse of Burrows-Wheeler transform
@@ -2212,8 +2316,13 @@ Inverse of C<create_adaptive_ac_entry()>.
 
 =head2 lz77_compress
 
+    # With Huffman coding
     lz77_compress($data, $out_fh);       # writes to file-handle
     my $string = lz77_compress($data);   # returns a binary string
+
+    # With Arithmetic Coding
+    lz77_compress($data, $out_fh, \&create_ac_entry);              # writes to file-handle
+    my $string = lz77_compress($data, undef, \&create_ac_entry);   # returns a binary string
 
 High-level function that performs LZ77 (Lempel-Ziv 1977) compression on the provided data, using the pipeline:
 
@@ -2258,6 +2367,45 @@ It takes a single parameter, C<$data>, representing the data string to be compre
     my $data = lzss_decompress($string, undef, \&decode_ac_entry);
 
 Inverse of C<lzss_compress()> and C<lz77_compress()>.
+
+=head2 lzhd_compress
+
+    # With Huffman coding
+    lzhd_compress($data, $out_fh);       # writes to file-handle
+    my $string = lzhd_compress($data);   # returns a binary string
+
+    # With Arithmetic Coding
+    lzhd_compress($data, $out_fh, \&create_ac_entry);              # writes to file-handle
+    my $string = lzhd_compress($data, undef, \&create_ac_entry);   # returns a binary string
+
+High-level function that performs LZ77 (Lempel-Ziv 1977) compression on the provided data, using the pipeline:
+
+    1. lz77_encode
+    2. create_huffman_entry(literals)
+    3. create_huffman_entry(lengths)
+    4. obh_encode(indices)
+
+It takes a single parameter, C<$data>, representing the data string to be compressed.
+
+=head2 lzhd_decompress
+
+    # Writing to file-handle
+    lzhd_decompress($fh, $out_fh);
+    lzhd_decompress($string, $out_fh);
+
+    # Writing to file-handle (does Arithmetic decoding)
+    lzhd_decompress($fh, $out_fh, \&decode_ac_entry);
+    lzhd_decompress($string, $out_fh, \&decode_ac_entry);
+
+    # Returning the results
+    my $data = lzhd_decompress($fh);
+    my $data = lzhd_decompress($string);
+
+    # Returning the results (does Arithmetic decoding)
+    my $data = lzhd_decompress($fh, undef, \&decode_ac_entry);
+    my $data = lzhd_decompress($string, undef, \&decode_ac_entry);
+
+Inverse of C<lzhd_compress()>.
 
 =head2 lzw_compress
 
@@ -2430,7 +2578,7 @@ Inverse of C<elias_omega_encode()>.
 
 Encodes a sequence of non-negative integers using the Adaptive Binary Concatenation encoding method.
 
-This method is particularly effective for encoding a sequence of integers that are in ascending order.
+This method is particularly effective in encoding a sequence of integers that are in ascending order.
 
 =head2 abc_decode
 
@@ -2441,6 +2589,30 @@ This method is particularly effective for encoding a sequence of integers that a
     my $symbols = abc_decode($string);
 
 Inverse of C<abc_encode()>.
+
+=head2 obh_encode
+
+    # With Huffman Coding
+    my $string = obh_encode(\@symbols);
+
+    # With Arithemtic Coding
+    my $string = obh_encode(\@symbols, \&create_ac_entry);
+
+Encodes a sequence of non-negative integers using offset bits and Huffman coding.
+
+This method is particularly effective in encoding a sequence of moderately large random integers, such as the list of indices returned by C<lz77_encode()>.
+
+=head2 obh_decode
+
+    # Given a filehandle
+    my $symbols = obh_decode($fh);                        # Huffman decoding
+    my $symbols = obh_decode($fh, \&decode_ac_entry);     # Arithemtic decoding
+
+    # Given a binary string
+    my $symbols = obh_decode($string);                    # Huffman decoding
+    my $symbols = obh_decode($string, \&decode_ac_entry); # Arithemtic decoding
+
+Inverse of C<obh_encode()>.
 
 =head2 bwt_encode
 

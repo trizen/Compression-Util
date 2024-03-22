@@ -11,6 +11,11 @@ examples/bzip2-like_symbolic.pl
 examples/lz77.pl
 examples/lz77_ac_string.pl
 examples/lz77_string.pl
+examples/lzhd.pl
+examples/lzhd_ac_string.pl
+examples/lzhd_adaptive_ac_string.pl
+examples/lzhd_obh_string.pl
+examples/lzhd_string.pl
 examples/lzss.pl
 examples/lzss_ac_string.pl
 examples/lzss_string.pl
@@ -37,6 +42,12 @@ t/bzip2_arithmetic_symbolic.t
 t/bzip2_symbolic.t
 t/lz77.t
 t/lz77_arithmetic.t
+t/lzhd.t
+t/lzhd_abc_encode.t
+t/lzhd_adaptive_arithmetic.t
+t/lzhd_arithmetic.t
+t/lzhd_delta_encode.t
+t/lzhd_obh_encode.t
 t/lzss.t
 t/lzss_adaptive_arithmetic.t
 t/lzss_arithmetic.t

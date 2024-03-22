@@ -123,6 +123,9 @@ The encoding of input and output file-handles must be set to `:raw`.
       lzss_compress($string)               # LZSS + DEFLATE-like encoding of indices and lengths
       lzss_decompress($fh)                 # Inverse of the above method
 
+      lzhd_compress($string)               # LZ77 + Huffman coding of lengths and literals + OBH for indices
+      lzhd_decompress($fh)                 # Inverse of the above method
+
       lzw_compress($string)                # LZW + abc_encode() compression
       lzw_decompress($fh)                  # Inverse of the above method
 ```
@@ -144,6 +147,9 @@ The encoding of input and output file-handles must be set to `:raw`.
 
       abc_encode(\@symbols)                # Adaptive Binary Concatenation method of an array of symbols
       abc_decode($fh)                      # Inverse of the above method
+
+      obh_encode(\@symbols)                # Offset bits + Huffman coding of an array of symbols
+      obh_decode($fh)                      # Inverse of the above method
 
       bwt_encode($string)                  # Burrows-Wheeler transform
       bwt_decode($bwt, $idx)               # Inverse of Burrows-Wheeler transform
@@ -273,8 +279,13 @@ Inverse of `create_adaptive_ac_entry()`.
 ## lz77\_compress
 
 ```perl
+    # With Huffman coding
     lz77_compress($data, $out_fh);       # writes to file-handle
     my $string = lz77_compress($data);   # returns a binary string
+
+    # With Arithmetic Coding
+    lz77_compress($data, $out_fh, \&create_ac_entry);              # writes to file-handle
+    my $string = lz77_compress($data, undef, \&create_ac_entry);   # returns a binary string
 ```
 
 High-level function that performs LZ77 (Lempel-Ziv 1977) compression on the provided data, using the pipeline:
@@ -324,6 +335,49 @@ It takes a single parameter, `$data`, representing the data string to be compres
 ```
 
 Inverse of `lzss_compress()` and `lz77_compress()`.
+
+## lzhd\_compress
+
+```perl
+    # With Huffman coding
+    lzhd_compress($data, $out_fh);       # writes to file-handle
+    my $string = lzhd_compress($data);   # returns a binary string
+
+    # With Arithmetic Coding
+    lzhd_compress($data, $out_fh, \&create_ac_entry);              # writes to file-handle
+    my $string = lzhd_compress($data, undef, \&create_ac_entry);   # returns a binary string
+```
+
+High-level function that performs LZ77 (Lempel-Ziv 1977) compression on the provided data, using the pipeline:
+
+    1. lz77_encode
+    2. create_huffman_entry(literals)
+    3. create_huffman_entry(lengths)
+    4. obh_encode(indices)
+
+It takes a single parameter, `$data`, representing the data string to be compressed.
+
+## lzhd\_decompress
+
+```perl
+    # Writing to file-handle
+    lzhd_decompress($fh, $out_fh);
+    lzhd_decompress($string, $out_fh);
+
+    # Writing to file-handle (does Arithmetic decoding)
+    lzhd_decompress($fh, $out_fh, \&decode_ac_entry);
+    lzhd_decompress($string, $out_fh, \&decode_ac_entry);
+
+    # Returning the results
+    my $data = lzhd_decompress($fh);
+    my $data = lzhd_decompress($string);
+
+    # Returning the results (does Arithmetic decoding)
+    my $data = lzhd_decompress($fh, undef, \&decode_ac_entry);
+    my $data = lzhd_decompress($string, undef, \&decode_ac_entry);
+```
+
+Inverse of `lzhd_compress()`.
 
 ## lzw\_compress
 
@@ -526,7 +580,7 @@ Inverse of `elias_omega_encode()`.
 
 Encodes a sequence of non-negative integers using the Adaptive Binary Concatenation encoding method.
 
-This method is particularly effective for encoding a sequence of integers that are in ascending order.
+This method is particularly effective in encoding a sequence of integers that are in ascending order.
 
 ## abc\_decode
 
@@ -539,6 +593,34 @@ This method is particularly effective for encoding a sequence of integers that a
 ```
 
 Inverse of `abc_encode()`.
+
+## obh\_encode
+
+```perl
+    # With Huffman Coding
+    my $string = obh_encode(\@symbols);
+
+    # With Arithemtic Coding
+    my $string = obh_encode(\@symbols, \&create_ac_entry);
+```
+
+Encodes a sequence of non-negative integers using offset bits and Huffman coding.
+
+This method is particularly effective in encoding a sequence of moderately large random integers, such as the list of indices returned by `lz77_encode()`.
+
+## obh\_decode
+
+```perl
+    # Given a filehandle
+    my $symbols = obh_decode($fh);                        # Huffman decoding
+    my $symbols = obh_decode($fh, \&decode_ac_entry);     # Arithemtic decoding
+
+    # Given a binary string
+    my $symbols = obh_decode($string);                    # Huffman decoding
+    my $symbols = obh_decode($string, \&decode_ac_entry); # Arithemtic decoding
+```
+
+Inverse of `obh_encode()`.
 
 ## bwt\_encode
 
@@ -965,27 +1047,27 @@ Nothing is exported by default.
 # SEE ALSO
 
 - Data Compression (Summer 2023) - Lecture 4 - The Unix 'compress' Program:
-        [https://youtube.com/watch?v=1cJL9Va80Pk](https://youtube.com/watch?v=1cJL9Va80Pk)
+    * [https://youtube.com/watch?v=1cJL9Va80Pk](https://youtube.com/watch?v=1cJL9Va80Pk)
 - Data Compression (Summer 2023) - Lecture 5 - Basic Techniques:
-        [https://youtube.com/watch?v=TdFWb8mL5Gk](https://youtube.com/watch?v=TdFWb8mL5Gk)
+    * [https://youtube.com/watch?v=TdFWb8mL5Gk](https://youtube.com/watch?v=TdFWb8mL5Gk)
 - Data Compression (Summer 2023) - Lecture 11 - DEFLATE (gzip):
-        [https://youtube.com/watch?v=SJPvNi4HrWQ](https://youtube.com/watch?v=SJPvNi4HrWQ)
+    * [https://youtube.com/watch?v=SJPvNi4HrWQ](https://youtube.com/watch?v=SJPvNi4HrWQ)
 - Data Compression (Summer 2023) - Lecture 12 - The Burrows-Wheeler Transform (BWT):
-        [https://youtube.com/watch?v=rQ7wwh4HRZM](https://youtube.com/watch?v=rQ7wwh4HRZM)
+    * [https://youtube.com/watch?v=rQ7wwh4HRZM](https://youtube.com/watch?v=rQ7wwh4HRZM)
 - Data Compression (Summer 2023) - Lecture 13 - BZip2:
-        [https://youtube.com/watch?v=cvoZbBZ3M2A](https://youtube.com/watch?v=cvoZbBZ3M2A)
+    * [https://youtube.com/watch?v=cvoZbBZ3M2A](https://youtube.com/watch?v=cvoZbBZ3M2A)
 - Data Compression (Summer 2023) - Lecture 15 - Infinite Precision in Finite Bits:
-        [https://youtube.com/watch?v=EqKbT3QdtOI](https://youtube.com/watch?v=EqKbT3QdtOI)
+    * [https://youtube.com/watch?v=EqKbT3QdtOI](https://youtube.com/watch?v=EqKbT3QdtOI)
 - Information Retrieval WS 17/18, Lecture 4: Compression, Codes, Entropy:
-        [https://youtube.com/watch?v=A\_F94FV21Ek](https://youtube.com/watch?v=A_F94FV21Ek)
+    * [https://youtube.com/watch?v=A\_F94FV21Ek](https://youtube.com/watch?v=A_F94FV21Ek)
 - COMP526 7-5 SS7.4 Run length encoding:
-        [https://youtube.com/watch?v=3jKLjmV1bL8](https://youtube.com/watch?v=3jKLjmV1bL8)
+    * [https://youtube.com/watch?v=3jKLjmV1bL8](https://youtube.com/watch?v=3jKLjmV1bL8)
 - COMP526 Unit 7-6 2020-03-24 Compression - Move-to-front transform:
-        [https://youtube.com/watch?v=Q2pinaj3i9Y](https://youtube.com/watch?v=Q2pinaj3i9Y)
+    * [https://youtube.com/watch?v=Q2pinaj3i9Y](https://youtube.com/watch?v=Q2pinaj3i9Y)
 - Basic arithmetic coder in C++:
-        [https://github.com/billbird/arith32](https://github.com/billbird/arith32)
+    * [https://github.com/billbird/arith32](https://github.com/billbird/arith32)
 - My blog post on "Lossless Data Compression":
-        [https://trizenx.blogspot.com/2023/09/lossless-data-compression.html](https://trizenx.blogspot.com/2023/09/lossless-data-compression.html)
+    * [https://trizenx.blogspot.com/2023/09/lossless-data-compression.html](https://trizenx.blogspot.com/2023/09/lossless-data-compression.html)
 
 # REPOSITORY
 

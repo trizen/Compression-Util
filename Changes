@@ -1,5 +1,16 @@
 Revision history for Compression-Util
 
+0.03    2024-03-22
+
+        [ADDITIONS]
+
+        - Added the lzhd_compress() and lzhd_decompress() functions.
+        - Added the obh_encode() and obh_decode() functions.
+
+        [CHANGES]
+
+        - Simplified deflate_encode() to no longer require the size of the uncompressed data.
+
 0.02    2024-03-21
 
         [ADDITIONS]

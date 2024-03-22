@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 45;
+plan tests => 51;
 
 ##################################
 
@@ -23,6 +23,10 @@ plan tests => 45;
     is_deeply(delta_decode(delta_encode(\@arr, 1), 1),            \@arr);
     is_deeply(rle4_decode(rle4_decode(\@arr)),                    \@arr);
     is_deeply([map { ($_->[0]) x $_->[1] } @{run_length(\@arr)}], \@arr);
+
+    is_deeply(obh_decode(obh_encode(\@arr)), \@arr);
+    is_deeply(obh_decode(obh_encode(\@arr, \&create_ac_entry),          \&decode_ac_entry),          \@arr);
+    is_deeply(obh_decode(obh_encode(\@arr, \&create_adaptive_ac_entry), \&decode_adaptive_ac_entry), \@arr);
 
     is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic(\@arr)), \@arr);
     is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic(\@arr, undef, \&create_ac_entry),          \&decode_ac_entry),          \@arr);
@@ -68,6 +72,10 @@ plan tests => 45;
     is_deeply(lzss_decompress(lzss_compress(pack('C*', @symbols))), pack('C*', @symbols));
     is_deeply(lzss_decompress(lzss_compress(pack('C*', @symbols), undef, \&create_ac_entry),          undef, \&decode_ac_entry),          pack('C*', @symbols));
     is_deeply(lzss_decompress(lzss_compress(pack('C*', @symbols), undef, \&create_adaptive_ac_entry), undef, \&decode_adaptive_ac_entry), pack('C*', @symbols));
+
+    is_deeply(lzhd_decompress(lzhd_compress(pack('C*', @symbols))), pack('C*', @symbols));
+    is_deeply(lzhd_decompress(lzhd_compress(pack('C*', @symbols), undef, \&create_ac_entry),          undef, \&decode_ac_entry),          pack('C*', @symbols));
+    is_deeply(lzhd_decompress(lzhd_compress(pack('C*', @symbols), undef, \&create_adaptive_ac_entry), undef, \&decode_adaptive_ac_entry), pack('C*', @symbols));
 
     is_deeply(bz2_decompress(bz2_compress(pack('C*', @symbols))), pack('C*', @symbols));
     is_deeply(bz2_decompress(bz2_compress(pack('C*', @symbols), undef, \&create_ac_entry),          undef, \&decode_ac_entry),          pack('C*', @symbols));
