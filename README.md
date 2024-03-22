@@ -53,17 +53,15 @@ my $data = do { open my $fh, '<:raw', $^X; local $/; <$fh> };
 my $rle4 = rle4_encode([unpack('C*', $data)]);
 my ($bwt, $idx) = bwt_encode(pack('C*', @$rle4));
 
-my @bytes        = unpack('C*', $bwt);
-my @alphabet     = sort { $a <=> $b } uniq(@bytes);
-my $alphabet_enc = encode_alphabet(\@alphabet);
+my @bytes    = unpack('C*', $bwt);
+my @alphabet = sort { $a <=> $b } uniq(@bytes);
 
 my $mtf = mtf_encode(\@bytes, \@alphabet);
 my $rle = zrle_encode($mtf);
 
 open my $out_fh, '>:raw', \my $enc;
-
 print $out_fh pack('N', $idx);
-print $out_fh $alphabet_enc;
+print $out_fh encode_alphabet(\@alphabet);
 create_huffman_entry($rle, $out_fh);
 
 say "Original size  : ", length($data);

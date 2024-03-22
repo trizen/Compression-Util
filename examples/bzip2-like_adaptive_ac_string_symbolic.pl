@@ -1,13 +1,17 @@
-#!perl -T
+#!/usr/bin/perl
+
+# Bzip2-like (symbolic) compressor/decompressor, for compressing a given string.
 
 use utf8;
 use 5.036;
-use Test::More;
+use lib               qw(../lib);
 use Compression::Util qw(:all);
 
-plan tests => 1;
+local $Compression::Util::VERBOSE = 0;
 
 foreach my $file (__FILE__) {
+
+    say "Compressing: $file";
 
     my $str = do {
         local $/;
@@ -15,10 +19,17 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = bz2_compress_symbolic([map { ord($_) } $str =~ /(\X)/g]);
-    my $dec = bz2_decompress_symbolic($enc);
+    my $enc = bz2_compress_symbolic([map { ord($_) } $str =~ /(\X)/g], undef, \&create_adaptive_ac_entry);
+    my $dec = bz2_decompress_symbolic($enc, \&decode_adaptive_ac_entry);
 
-    is($str, join('', map { chr($_) } @$dec));
+    say "Original size  : ", length($str);
+    say "Compressed size: ", length($enc);
+
+    if ($str ne join('', map { chr($_) } @$dec)) {
+        die "Decompression error";
+    }
+
+    say '';
 }
 
 __END__

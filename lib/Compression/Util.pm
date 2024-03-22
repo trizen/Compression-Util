@@ -2012,17 +2012,15 @@ This functionality is provided by the function C<bz2_compress()>, which can be e
     my $rle4 = rle4_encode([unpack('C*', $data)]);
     my ($bwt, $idx) = bwt_encode(pack('C*', @$rle4));
 
-    my @bytes        = unpack('C*', $bwt);
-    my @alphabet     = sort { $a <=> $b } uniq(@bytes);
-    my $alphabet_enc = encode_alphabet(\@alphabet);
+    my @bytes    = unpack('C*', $bwt);
+    my @alphabet = sort { $a <=> $b } uniq(@bytes);
 
     my $mtf = mtf_encode(\@bytes, \@alphabet);
     my $rle = zrle_encode($mtf);
 
     open my $out_fh, '>:raw', \my $enc;
-
     print $out_fh pack('N', $idx);
-    print $out_fh $alphabet_enc;
+    print $out_fh encode_alphabet(\@alphabet);
     create_huffman_entry($rle, $out_fh);
 
     say "Original size  : ", length($data);
@@ -2548,11 +2546,11 @@ Inverse of C<rle4_encode()>.
 
 =head2 zrle_encode
 
-    my $zrle = zrle_encode($symbols);
+    my $zrle = zrle_encode(\@symbols);
 
 Performs Zero-Run-Length Encoding (ZRLE) on a sequence of symbolic elements.
 
-It takes a single parameter C<$symbols>, representing the sequence of symbols to be encoded, and returns the encoded ZRLE sequence as an array-ref of symbols.
+It takes a single parameter C<\@symbols>, representing the sequence of symbols to be encoded, and returns the encoded ZRLE sequence as an array-ref of symbols.
 
 This function efficiently encodes only runs of zeros, but also increments each symbol by C<1>.
 
