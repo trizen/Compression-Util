@@ -2,7 +2,7 @@ package Compression::Util;
 
 use utf8;
 use 5.036;
-use List::Util qw(uniq max);
+use List::Util qw(uniq max sum);
 
 require Exporter;
 
@@ -150,74 +150,242 @@ sub read_bits ($fh, $bits_len) {
     return $data;
 }
 
-sub delta_encode ($integers, $double = 0) {
+sub deltas ($integers) {
 
     my @deltas;
     my $prev = 0;
-    my @ints = @$integers;
 
-    unshift(@ints, scalar(@ints));
-
-    while (@ints) {
-        my $curr = shift(@ints);
-        push @deltas, $curr - $prev;
-        $prev = $curr;
+    foreach my $n (@$integers) {
+        push @deltas, $n - $prev;
+        $prev = $n;
     }
 
-    my $bitstring = '';
+    return \@deltas;
+}
 
-    foreach my $d (@deltas) {
+sub accumulate ($deltas) {
+
+    my @acc;
+    my $prev = 0;
+
+    foreach my $d (@$deltas) {
+        $prev += $d;
+        push @acc, $prev;
+    }
+
+    return \@acc;
+}
+
+sub _compute_elias_costs ($run_length) {
+
+    # Check which method results in better compression
+    my $with_rle    = 0;
+    my $without_rle = 0;
+
+    my $double_with_rle    = 0;
+    my $double_without_rle = 0;
+
+    # Check if there are any negative values or zero values
+    my $has_negative = 0;
+    my $has_zero     = 0;
+
+    foreach my $pair (@$run_length) {
+        my ($c, $v) = @$pair;
+
+        if ($c < 0 and not $has_negative) {
+            $has_negative = 1;
+        }
+
+        if ($c == 0) {
+            $with_rle           += 1;
+            $double_with_rle    += 1;
+            $without_rle        += $v;
+            $double_without_rle += $v;
+            $has_zero ||= 1;
+        }
+        else {
+
+            {    # double
+                my $t   = int(log(abs($c) + 1) / log(2) + 1);
+                my $l   = int(log($t) / log(2) + 1);
+                my $len = 2 * ($l - 1) + ($t - 1) + 3;
+
+                $double_with_rle    += $len;
+                $double_without_rle += $len * $v;
+            }
+
+            {    # single
+                my $t   = int(log(abs($c) + 1) / log(2) + 1);
+                my $len = 2 * ($t - 1) + 3;
+                $with_rle    += $len;
+                $without_rle += $len * $v;
+            }
+        }
+
+        if ($v == 1) {
+            $with_rle        += 1;
+            $double_with_rle += 1;
+        }
+        else {
+            my $t   = int(log($v) / log(2) + 1);
+            my $len = 2 * ($t - 1) + 1;
+            $with_rle        += $len;
+            $double_with_rle += $len;
+        }
+    }
+
+    scalar {
+            has_negative => $has_negative,
+            has_zero     => $has_zero,
+            methods      => {
+                        with_rle           => $with_rle,
+                        without_rle        => $without_rle,
+                        double_with_rle    => $double_with_rle,
+                        double_without_rle => $double_without_rle,
+                       },
+           };
+}
+
+sub _find_best_encoding_method ($integers) {
+    my $rl            = run_length($integers);
+    my $costs         = _compute_elias_costs($rl);
+    my ($best_method) = sort { $costs->{methods}{$a} <=> $costs->{methods}{$b} } keys(%{$costs->{methods}});
+    $VERBOSE && say STDERR "$best_method --> $costs->{methods}{$best_method}";
+    return ($rl, $best_method, $costs);
+}
+
+sub delta_encode ($integers) {
+
+    my $deltas = deltas($integers);
+
+    my @methods = (
+                   [_find_best_encoding_method($integers),                                      0, 0],
+                   [_find_best_encoding_method($deltas),                                        1, 0],
+                   [_find_best_encoding_method(rle4_encode($integers, scalar(@$integers) + 1)), 0, 1],
+                   [_find_best_encoding_method(rle4_encode($deltas, scalar(@$integers) + 1)),   1, 1],
+                  );
+
+    my ($best) = sort { $a->[2]{methods}{$a->[1]} <=> $b->[2]{methods}{$b->[1]} } @methods;
+
+    my ($rl, $method, $stats, $with_deltas, $with_rle4) = @$best;
+
+    my $double       = 0;
+    my $with_rle     = 0;
+    my $has_negative = $stats->{has_negative};
+
+    if ($method eq 'with_rle') {
+        $with_rle = 1;
+    }
+    elsif ($method eq 'without_rle') {
+        ## ok
+    }
+    elsif ($method eq 'double_with_rle') {
+        $with_rle = 1;
+        $double   = 1;
+    }
+    elsif ($method eq 'double_without_rle') {
+        $double = 1;
+    }
+    else {
+        die "[BUG] Unknown encoding method: $method";
+    }
+
+    my $code      = '';
+    my $bitstring = join('', $double, $with_rle, $has_negative, $with_deltas, $with_rle4);
+    my $length    = sum(map { $_->[1] } @$rl) // 0;
+
+    foreach my $pair ([$length, 1], @$rl) {
+        my ($d, $v) = @$pair;
+
         if ($d == 0) {
-            $bitstring .= '0';
+            $code = '0';
         }
         elsif ($double) {
             my $t = sprintf('%b', abs($d) + 1);
             my $l = sprintf('%b', length($t));
-            $bitstring .= '1' . (($d < 0) ? '0' : '1') . ('1' x (length($l) - 1)) . '0' . substr($l, 1) . substr($t, 1);
+            $code = ($has_negative ? ('1' . (($d < 0) ? '0' : '1')) : '') . ('1' x (length($l) - 1)) . '0' . substr($l, 1) . substr($t, 1);
         }
         else {
-            my $t = sprintf('%b', abs($d));
-            $bitstring .= '1' . (($d < 0) ? '0' : '1') . ('1' x (length($t) - 1)) . '0' . substr($t, 1);
+            my $t = sprintf('%b', abs($d) + ($has_negative ? 0 : 1));
+            $code = ($has_negative ? ('1' . (($d < 0) ? '0' : '1')) : '') . ('1' x (length($t) - 1)) . '0' . substr($t, 1);
+        }
+
+        $bitstring .= $code;
+
+        if (not $with_rle) {
+            if ($v > 1) {
+                $bitstring .= $code x ($v - 1);
+            }
+            next;
+        }
+
+        if ($v == 1) {
+            $bitstring .= '0';
+        }
+        else {
+            my $t = sprintf('%b', $v);
+            $bitstring .= join('', '1' x (length($t) - 1), '0', substr($t, 1));
         }
     }
 
     pack('B*', $bitstring);
 }
 
-sub delta_decode ($fh, $double = 0) {
+sub delta_decode ($fh) {
 
     if (ref($fh) eq '') {
         open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $double);
+        return __SUB__->($fh2);
     }
 
+    my $buffer       = '';
+    my $double       = read_bit($fh, \$buffer);
+    my $with_rle     = read_bit($fh, \$buffer);
+    my $has_negative = read_bit($fh, \$buffer);
+    my $with_deltas  = read_bit($fh, \$buffer);
+    my $with_rle4    = read_bit($fh, \$buffer);
+
     my @deltas;
-    my $buffer = '';
-    my $len    = 0;
+    my $len = 0;
 
     for (my $k = 0 ; $k <= $len ; ++$k) {
+
         my $bit = read_bit($fh, \$buffer);
 
         if ($bit eq '0') {
             push @deltas, 0;
         }
         elsif ($double) {
-            my $bit = read_bit($fh, \$buffer);
+            my $bit = $has_negative ? read_bit($fh, \$buffer) : 0;
 
-            my $bl = 0;
+            my $bl = $has_negative ? 0 : 1;
             ++$bl while (read_bit($fh, \$buffer) eq '1');
 
             my $bl2 = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. $bl));
             my $int = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. ($bl2 - 1)));
 
-            push @deltas, ($bit eq '1' ? 1 : -1) * ($int - 1);
+            push @deltas, ($has_negative ? ($bit eq '1' ? 1 : -1) : 1) * ($int - 1);
         }
         else {
-            my $bit = read_bit($fh, \$buffer);
-            my $n   = 0;
+            my $bit = $has_negative ? read_bit($fh, \$buffer) : 0;
+            my $n   = $has_negative ? 0                       : 1;
             ++$n while (read_bit($fh, \$buffer) eq '1');
             my $d = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. $n));
-            push @deltas, ($bit eq '1' ? $d : -$d);
+            push @deltas, $has_negative ? ($bit eq '1' ? $d : -$d) : ($d - 1);
+        }
+
+        if ($with_rle) {
+
+            my $bl = 0;
+            while (read_bit($fh, \$buffer) == 1) {
+                ++$bl;
+            }
+
+            if ($bl > 0) {
+                my $run = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. $bl)) - 1;
+                $k += $run;
+                push @deltas, ($deltas[-1]) x $run;
+            }
         }
 
         if ($k == 0) {
@@ -225,15 +393,10 @@ sub delta_decode ($fh, $double = 0) {
         }
     }
 
-    my @acc;
-    my $prev = $len;
-
-    foreach my $d (@deltas) {
-        $prev += $d;
-        push @acc, $prev;
-    }
-
-    return \@acc;
+    my $decoded = \@deltas;
+    $decoded = rle4_decode($decoded) if $with_rle4;
+    $decoded = accumulate($decoded)  if $with_deltas;
+    return $decoded;
 }
 
 ########################
@@ -332,10 +495,10 @@ sub elias_gamma_decode ($fh) {
 
     for (my $k = 0 ; $k <= $len ; ++$k) {
 
-        my $bl = 0;
-        ++$bl while (read_bit($fh, \$buffer) eq '1');
+        my $n = 0;
+        ++$n while (read_bit($fh, \$buffer) eq '1');
 
-        push @ints, oct('0b' . '1' . join('', map { read_bit($fh, \$buffer) } 1 .. $bl)) - 1;
+        push @ints, oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. $n)) - 1;
 
         if ($k == 0) {
             $len = pop(@ints);
@@ -357,8 +520,8 @@ sub elias_omega_encode ($integers) {
             $bitstring .= '0';
         }
         else {
-            my $t = sprintf('%b', $k);
-            my $l = length($t) + 1;
+            my $t = sprintf('%b', $k + 1);
+            my $l = length($t);
             my $L = sprintf('%b', $l);
             $bitstring .= ('1' x (length($L) - 1)) . '0' . substr($L, 1) . substr($t, 1);
         }
@@ -385,8 +548,8 @@ sub elias_omega_decode ($fh) {
 
         if ($bl > 0) {
 
-            my $bl2 = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. $bl)) - 1;
-            my $int = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. ($bl2 - 1)));
+            my $bl2 = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. $bl));
+            my $int = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. ($bl2 - 1))) - 1;
 
             push @ints, $int;
         }
@@ -1102,7 +1265,7 @@ sub run_length ($arr, $max_run = undef) {
 
         my $curr_value = $arr->[$i];
 
-        if ($curr_value eq $prev_value and (defined($max_run) ? $result[-1][1] < $max_run : 1)) {
+        if ($curr_value == $prev_value and (defined($max_run) ? $result[-1][1] < $max_run : 1)) {
             ++$result[-1][1];
         }
         else {
@@ -1313,16 +1476,21 @@ sub _encode_alphabet_256 ($alphabet) {
             }
         }
 
-        if ($enc == 0) {
-            $populated <<= 1;
-        }
-        else {
-            ($populated <<= 1) |= 1;
-            push @marked, $enc;
+        $populated <<= 1;
+
+        if ($enc > 0) {
+            $populated |= 1;
+
+            if ($enc == 0xffffffff) {
+                push @marked, -1;    # fixes an warning in delta_encode()
+            }
+            else {
+                push @marked, $enc;
+            }
         }
     }
 
-    my $delta = delta_encode(\@marked, 1);
+    my $delta = delta_encode(\@marked);
 
     $VERBOSE && say STDERR "Populated : ", sprintf('%08b', $populated);
     $VERBOSE && say STDERR "Marked    : @marked";
@@ -1337,12 +1505,12 @@ sub _encode_alphabet_256 ($alphabet) {
 sub _decode_alphabet_256 ($fh) {
 
     my @populated = split(//, sprintf('%08b', ord(getc($fh))));
-    my $marked    = delta_decode($fh, 1);
+    my @marked    = map { ($_ == -1) ? 0xffffffff : $_ } @{delta_decode($fh)};
 
     my @alphabet;
     for (my $i = 0 ; $i <= 255 ; $i += 32) {
         if (shift(@populated)) {
-            my $m = shift(@$marked);
+            my $m = shift(@marked);
             foreach my $j (0 .. 31) {
                 if ($m & 1) {
                     push @alphabet, $i + $j;
@@ -1433,7 +1601,7 @@ sub encode_alphabet ($alphabet) {
     }
 
     # TODO: encode the alphabet more efficiently when max_symbol >= 256
-    return (chr(0) . delta_encode([reverse @$alphabet]));
+    return (chr(0) . delta_encode($alphabet));
 }
 
 sub decode_alphabet ($fh) {
@@ -1447,7 +1615,7 @@ sub decode_alphabet ($fh) {
         return _decode_alphabet_256($fh);
     }
 
-    return [reverse @{delta_decode($fh)}];
+    return delta_decode($fh);
 }
 
 ############################################################
@@ -2157,14 +2325,14 @@ The encoding of input and output file-handles must be set to C<:raw>.
 
 =head1 HIGH-LEVEL FUNCTIONS
 
-      create_huffman_entry(\@symbols, $fh) # Create a Huffman Coding block
+      create_huffman_entry(\@symbols)      # Create a Huffman Coding block
       decode_huffman_entry($fh)            # Decode a Huffman Coding block
 
-      create_ac_entry(\@symbols, $fh)      # Create an Arithmetic Coding block
+      create_ac_entry(\@symbols)           # Create an Arithmetic Coding block
       decode_ac_entry($fh)                 # Decode an Arithmetic Coding block
 
-      create_adaptive_ac_entry(\@symbols, $fh)  # Create an Adaptive Arithmetic Coding block
-      decode_adaptive_ac_entry($fh)             # Decode an Adaptive Arithmetic Coding block
+      create_adaptive_ac_entry(\@symbols)  # Create an Adaptive Arithmetic Coding block
+      decode_adaptive_ac_entry($fh)        # Decode an Adaptive Arithmetic Coding block
 
       bz2_compress($string)                # Bzip2-like compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
       bz2_decompress($fh)                  # Inverse of the above method
@@ -2186,8 +2354,11 @@ The encoding of input and output file-handles must be set to C<:raw>.
 
 =head1 MEDIUM-LEVEL FUNCTIONS
 
-      delta_encode(\@ints, $double=0)      # Delta encoding of an array of ints
-      delta_decode($fh, $double=0)         # Inverse of the above method
+      deltas(\@ints)                       # Computes the differences between integers
+      accumulate(\@deltas)                 # Inverse of the above method
+
+      delta_encode(\@ints)                 # Delta+RLE encoding of an array of ints
+      delta_decode($fh)                    # Inverse of the above method
 
       fibonacci_encode(\@symbols)          # Fibonacci coding of an array of symbols
       fibonacci_decode($fh)                # Inverse of the above method
@@ -2328,8 +2499,6 @@ High-level function that performs LZ77 (Lempel-Ziv 1977) compression on the prov
 
     1. lz77_encode
     2. deflate_encode
-
-It takes a single parameter, C<$data>, representing the data string to be compressed.
 
 =head2 lzss_compress
 
@@ -2501,14 +2670,25 @@ Inverse of C<bz2_compress_symbolic()>.
 
 =head1 INTERFACE FOR MEDIUM-LEVEL FUNCTIONS
 
+=head2 deltas
+
+    my $deltas = deltas(\@integers);
+
+Computes the differences between consecutive integers, returning an array.
+
+=head2 accumulate
+
+    my $integers = accumulate(\@deltas);
+
+Inverse of C<deltas()>.
+
 =head2 delta_encode
 
     my $string = delta_encode(\@integers);
-    my $string = delta_encode(\@integers, 1);    # double
 
-Encodes a sequence of integers using Delta + Elias omega coding, returning a binary string.
+Encodes a sequence of integers (including negative integers) using Delta + Run-length + Elias omega coding, returning a binary string.
 
-Delta encoding calculates the difference between consecutive integers in the sequence and encodes these differences using Elias omega coding.
+Delta encoding calculates the difference between consecutive integers in the sequence and encodes these differences using Elias omega coding. When it's beneficial, runs of identitical symbols are collapsed with RLE.
 
 It takes two parameters: C<\@integers>, representing the sequence of arbitrary integers to be encoded, and an optional parameter which defaults to C<0>. If the second parameter is set to a true value, double Elias omega coding is performed, which results in better compression for very large integers.
 
@@ -2516,11 +2696,9 @@ It takes two parameters: C<\@integers>, representing the sequence of arbitrary i
 
     # Given a file-handle
     my $integers = delta_decode($fh);
-    my $integers = delta_decode($fh, 1);       # double
 
     # Given a string
     my $integers = delta_decode($string);
-    my $integers = delta_decode($string, 1);   # double
 
 Inverse of C<delta_encode()>.
 
