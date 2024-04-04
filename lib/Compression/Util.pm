@@ -1160,23 +1160,25 @@ sub decode_adaptive_ac_entry ($fh) {
 # Move to front transform
 ##########################
 
-sub mtf_encode ($bytes, $alphabet = [0 .. 255]) {
+sub mtf_encode ($symbols) {
 
     my (@C, @table);
-    my @alpha = @$alphabet;
 
-    @table[@alpha] = (0 .. $#alpha);
+    my @alphabet      = sort { $a <=> $b } uniq(@$symbols);
+    my @alphabet_copy = @alphabet;
 
-    foreach my $c (@$bytes) {
+    @table[@alphabet] = (0 .. $#alphabet);
+
+    foreach my $c (@$symbols) {
         push @C, (my $index = $table[$c]);
-        unshift(@alpha, splice(@alpha, $index, 1));
-        @table[@alpha[0 .. $index]] = (0 .. $index);
+        unshift(@alphabet, splice(@alphabet, $index, 1));
+        @table[@alphabet[0 .. $index]] = (0 .. $index);
     }
 
-    return \@C;
+    return (\@C, \@alphabet_copy);
 }
 
-sub mtf_decode ($encoded, $alphabet = [0 .. 255]) {
+sub mtf_decode ($encoded, $alphabet) {
 
     my @S;
     my @alpha = @$alphabet;
@@ -1634,20 +1636,16 @@ sub bz2_compress_symbolic ($symbols, $out_fh = undef, $entropy_sub = \&create_hu
     my $rle4 = rle4_encode($symbols);
     my ($bwt, $idx) = bwt_encode_symbolic($rle4);
 
-    my @bytes        = @$bwt;
-    my @alphabet     = sort { $a <=> $b } uniq(@bytes);
-    my $alphabet_enc = encode_alphabet(\@alphabet);
+    my ($mtf, $alphabet) = mtf_encode($bwt);
+    my $rle = zrle_encode($mtf);
 
     $VERBOSE && say STDERR "BWT index = $idx";
-    $VERBOSE && say STDERR "Max symbol: ", max(@alphabet) // 0;
-
-    my $mtf = mtf_encode(\@bytes, \@alphabet);
-    my $rle = zrle_encode($mtf);
+    $VERBOSE && say STDERR "Max symbol: ", max(@$alphabet) // 0;
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
 
     print $out_fh pack('N', $idx);
-    print $out_fh $alphabet_enc;
+    print $out_fh encode_alphabet($alphabet);
     $entropy_sub->($rle, $out_fh);
 
     return $out_str;
@@ -1682,17 +1680,13 @@ sub bz2_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry
 
     $VERBOSE && say STDERR "BWT index = $idx";
 
-    my @bytes        = unpack('C*', $bwt);
-    my @alphabet     = sort { $a <=> $b } uniq(@bytes);
-    my $alphabet_enc = encode_alphabet(\@alphabet);
-
-    my $mtf = mtf_encode(\@bytes, \@alphabet);
+    my ($mtf, $alphabet) = mtf_encode([unpack 'C*', $bwt]);
     my $rle = zrle_encode($mtf);
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
 
     print $out_fh pack('N', $idx);
-    print $out_fh $alphabet_enc;
+    print $out_fh encode_alphabet($alphabet);
     $entropy_sub->($rle, $out_fh);
 
     return $out_str;
@@ -2281,15 +2275,12 @@ This functionality is provided by the function C<bz2_compress()>, which can be e
     my $rle4 = rle4_encode([unpack('C*', $data)]);
     my ($bwt, $idx) = bwt_encode(pack('C*', @$rle4));
 
-    my @bytes    = unpack('C*', $bwt);
-    my @alphabet = sort { $a <=> $b } uniq(@bytes);
-
-    my $mtf = mtf_encode(\@bytes, \@alphabet);
+    my ($mtf, $alphabet) = mtf_encode([unpack("C*", $bwt)]);
     my $rle = zrle_encode($mtf);
 
     open my $out_fh, '>:raw', \my $enc;
     print $out_fh pack('N', $idx);
-    print $out_fh encode_alphabet(\@alphabet);
+    print $out_fh encode_alphabet($alphabet);
     create_huffman_entry($rle, $out_fh);
 
     say "Original size  : ", length($data);
@@ -2384,7 +2375,7 @@ The encoding of input and output file-handles must be set to C<:raw>.
       bwt_encode_symbolic(\@symbols)       # Burrows-Wheeler transform over an array of symbols
       bwt_decode_symbolic(\@bwt, $idx)     # Inverse of symbolic Burrows-Wheeler transform
 
-      mtf_encode(\@symbols, \@alphabet)    # Move-to-front transform
+      mtf_encode(\@symbols)                # Move-to-front transform
       mtf_decode(\@mtf, \@alphabet)        # Inverse of the above method
 
       encode_alphabet(\@alphabet)          # Encode an alphabet of symbols into a binary string
@@ -2838,11 +2829,11 @@ The function returns the original sequence of symbolic elements.
 
 =head2 mtf_encode
 
-    my $mtf = mtf_encode(\@symbols, \@alphabet);
+    my ($mtf, $alphabet) = mtf_encode(\@symbols);
 
-Performs Move-To-Front (MTF) encoding on a sequence of symbols using a given alphabet.
+Performs Move-To-Front (MTF) encoding on a sequence of symbols.
 
-It takes two parameters: C<\@symbols>, representing the sequence of symbols to be encoded, and C<\@alphabet>, representing the ordered alphabet used for encoding. The function returns the encoded MTF sequence.
+It takes one parameter: C<\@symbols>, representing the sequence of symbols to be encoded. The function returns the encoded MTF sequence and the sorted list of unique symbols in the input data, representing the alphabet.
 
 =head2 mtf_decode
 
