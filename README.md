@@ -53,15 +53,12 @@ my $data = do { open my $fh, '<:raw', $^X; local $/; <$fh> };
 my $rle4 = rle4_encode([unpack('C*', $data)]);
 my ($bwt, $idx) = bwt_encode(pack('C*', @$rle4));
 
-my @bytes    = unpack('C*', $bwt);
-my @alphabet = sort { $a <=> $b } uniq(@bytes);
-
-my $mtf = mtf_encode(\@bytes, \@alphabet);
+my ($mtf, $alphabet) = mtf_encode([unpack("C*", $bwt)]);
 my $rle = zrle_encode($mtf);
 
 open my $out_fh, '>:raw', \my $enc;
 print $out_fh pack('N', $idx);
-print $out_fh encode_alphabet(\@alphabet);
+print $out_fh encode_alphabet($alphabet);
 create_huffman_entry($rle, $out_fh);
 
 say "Original size  : ", length($data);
@@ -102,14 +99,14 @@ The encoding of input and output file-handles must be set to `:raw`.
 # HIGH-LEVEL FUNCTIONS
 
 ```perl
-      create_huffman_entry(\@symbols, $fh) # Create a Huffman Coding block
+      create_huffman_entry(\@symbols)      # Create a Huffman Coding block
       decode_huffman_entry($fh)            # Decode a Huffman Coding block
 
-      create_ac_entry(\@symbols, $fh)      # Create an Arithmetic Coding block
+      create_ac_entry(\@symbols)           # Create an Arithmetic Coding block
       decode_ac_entry($fh)                 # Decode an Arithmetic Coding block
 
-      create_adaptive_ac_entry(\@symbols, $fh)  # Create an Adaptive Arithmetic Coding block
-      decode_adaptive_ac_entry($fh)             # Decode an Adaptive Arithmetic Coding block
+      create_adaptive_ac_entry(\@symbols)  # Create an Adaptive Arithmetic Coding block
+      decode_adaptive_ac_entry($fh)        # Decode an Adaptive Arithmetic Coding block
 
       bz2_compress($string)                # Bzip2-like compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
       bz2_decompress($fh)                  # Inverse of the above method
@@ -133,8 +130,11 @@ The encoding of input and output file-handles must be set to `:raw`.
 # MEDIUM-LEVEL FUNCTIONS
 
 ```perl
-      delta_encode(\@ints, $double=0)      # Delta encoding of an array of ints
-      delta_decode($fh, $double=0)         # Inverse of the above method
+      deltas(\@ints)                       # Computes the differences between integers
+      accumulate(\@deltas)                 # Inverse of the above method
+
+      delta_encode(\@ints)                 # Delta+RLE encoding of an array of ints
+      delta_decode($fh)                    # Inverse of the above method
 
       fibonacci_encode(\@symbols)          # Fibonacci coding of an array of symbols
       fibonacci_decode($fh)                # Inverse of the above method
@@ -157,7 +157,7 @@ The encoding of input and output file-handles must be set to `:raw`.
       bwt_encode_symbolic(\@symbols)       # Burrows-Wheeler transform over an array of symbols
       bwt_decode_symbolic(\@bwt, $idx)     # Inverse of symbolic Burrows-Wheeler transform
 
-      mtf_encode(\@symbols, \@alphabet)    # Move-to-front transform
+      mtf_encode(\@symbols)                # Move-to-front transform
       mtf_decode(\@mtf, \@alphabet)        # Inverse of the above method
 
       encode_alphabet(\@alphabet)          # Encode an alphabet of symbols into a binary string
@@ -485,6 +485,22 @@ Inverse of `bz2_compress_symbolic()`.
 
 # INTERFACE FOR MEDIUM-LEVEL FUNCTIONS
 
+## deltas
+
+```perl
+    my $deltas = deltas(\@integers);
+```
+
+Computes the differences between consecutive integers, returning an array.
+
+## accumulate
+
+```perl
+    my $integers = accumulate(\@deltas);
+```
+
+Inverse of `deltas()`.
+
 ## delta\_encode
 
 ```perl
@@ -492,9 +508,9 @@ Inverse of `bz2_compress_symbolic()`.
     my $string = delta_encode(\@integers, 1);    # double
 ```
 
-Encodes a sequence of integers using Delta + Elias omega coding, returning a binary string.
+Encodes a sequence of integers (including negative integers) using Delta + Run-length + Elias omega coding, returning a binary string.
 
-Delta encoding calculates the difference between consecutive integers in the sequence and encodes these differences using Elias omega coding.
+Delta encoding calculates the difference between consecutive integers in the sequence and encodes these differences using Elias omega coding. When it's beneficial, runs of identitical symbols are collapsed with RLE.
 
 It takes two parameters: `\@integers`, representing the sequence of arbitrary integers to be encoded, and an optional parameter which defaults to `0`. If the second parameter is set to a true value, double Elias omega coding is performed, which results in better compression for very large integers.
 
@@ -503,11 +519,9 @@ It takes two parameters: `\@integers`, representing the sequence of arbitrary in
 ```perl
     # Given a file-handle
     my $integers = delta_decode($fh);
-    my $integers = delta_decode($fh, 1);       # double
 
     # Given a string
     my $integers = delta_decode($string);
-    my $integers = delta_decode($string, 1);   # double
 ```
 
 Inverse of `delta_encode()`.
@@ -674,12 +688,12 @@ The function returns the original sequence of symbolic elements.
 ## mtf\_encode
 
 ```perl
-    my $mtf = mtf_encode(\@symbols, \@alphabet);
+    my ($mtf, $alphabet) = mtf_encode(\@symbols);
 ```
 
-Performs Move-To-Front (MTF) encoding on a sequence of symbols using a given alphabet.
+Performs Move-To-Front (MTF) encoding on a sequence of symbols.
 
-It takes two parameters: `\@symbols`, representing the sequence of symbols to be encoded, and `\@alphabet`, representing the ordered alphabet used for encoding. The function returns the encoded MTF sequence.
+It takes one parameter: `\@symbols`, representing the sequence of symbols to be encoded. The function returns the encoded MTF sequence and the sorted list of unique symbols in the input data, representing the alphabet.
 
 ## mtf\_decode
 
