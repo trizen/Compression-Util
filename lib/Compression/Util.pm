@@ -953,12 +953,12 @@ sub decode_ac_entry ($fh) {
 # Adaptive Arithemtic Coding (in fixed bits)
 #############################################
 
-sub _create_adaptive_cfreq ($freq_value, $alphabet) {
+sub _create_adaptive_cfreq ($freq_value, $alphabet_size) {
 
     my $T = 0;
     my (@cf, @freq);
 
-    foreach my $i (@$alphabet) {
+    foreach my $i (0 .. $alphabet_size) {
         $freq[$i] = $freq_value;
         $cf[$i]   = $T;
         $T += $freq_value;
@@ -968,13 +968,12 @@ sub _create_adaptive_cfreq ($freq_value, $alphabet) {
     return (\@freq, \@cf, $T);
 }
 
-sub _increment_freq ($c, $alphabet, $freq, $cf) {
+sub _increment_freq ($c, $alphabet_size, $freq, $cf) {
 
     ++$freq->[$c];
     my $T = $cf->[$c];
 
-    foreach my $i (@$alphabet) {
-        next if ($i < $c);
+    foreach my $i ($c .. $alphabet_size) {
         $cf->[$i] = $T;
         $T += $freq->[$i];
         $cf->[$i + 1] = $T;
@@ -987,9 +986,13 @@ sub adaptive_ac_encode ($symbols) {
 
     my $enc      = '';
     my @bytes    = (@$symbols, (max(@$symbols) // 0) + 1);
-    my $alphabet = [sort { $a <=> $b } uniq(@bytes)];
+    my @alphabet = sort { $a <=> $b } uniq(@bytes);
 
-    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet);
+    my $alphabet_size = $#alphabet;
+    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet_size);
+
+    my %table;
+    @table{@alphabet} = (0 .. $alphabet_size);
 
     if ($T > MAX) {
         die "Too few bits: $T > ${\MAX}";
@@ -999,14 +1002,15 @@ sub adaptive_ac_encode ($symbols) {
     my $high     = MAX;
     my $uf_count = 0;
 
-    foreach my $c (@bytes) {
+    foreach my $value (@bytes) {
 
+        my $c = $table{$value};
         my $w = $high - $low + 1;
 
         $high = ($low + int(($w * $cf->[$c + 1]) / $T) - 1) & MAX;
         $low  = ($low + int(($w * $cf->[$c]) / $T)) & MAX;
 
-        $T = _increment_freq($c, $alphabet, $freq, $cf);
+        $T = _increment_freq($c, $alphabet_size, $freq, $cf);
 
         if ($high > MAX) {
             die "high > MAX: $high > ${\MAX}";
@@ -1051,7 +1055,7 @@ sub adaptive_ac_encode ($symbols) {
         $enc .= '1';
     }
 
-    return ($enc, $alphabet);
+    return ($enc, \@alphabet);
 }
 
 sub adaptive_ac_decode ($fh, $alphabet) {
@@ -1061,13 +1065,12 @@ sub adaptive_ac_decode ($fh, $alphabet) {
         return __SUB__->($fh2, $alphabet);
     }
 
-    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet);
-
     my @dec;
-    my $low        = 0;
-    my $high       = MAX;
-    my @alpha      = @$alphabet;
-    my $max_symbol = $alpha[-1];
+    my $low  = 0;
+    my $high = MAX;
+
+    my $alphabet_size = $#{$alphabet};
+    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet_size);
 
     my $enc = oct('0b' . join '', map { getc($fh) // 1 } 1 .. BITS);
 
@@ -1076,20 +1079,20 @@ sub adaptive_ac_decode ($fh, $alphabet) {
         my $ss = int((($T * ($enc - $low + 1)) - 1) / $w);
 
         my $i = 0;
-        foreach my $j (@alpha) {
+        foreach my $j (0 .. $alphabet_size) {
             if ($cf->[$j] <= $ss and $ss < $cf->[$j + 1]) {
                 $i = $j;
                 last;
             }
         }
 
-        last if ($i == $max_symbol);
-        push @dec, $i;
+        last if ($i == $alphabet_size);
+        push @dec, $alphabet->[$i];
 
         $high = ($low + int(($w * $cf->[$i + 1]) / $T) - 1) & MAX;
         $low  = ($low + int(($w * $cf->[$i]) / $T)) & MAX;
 
-        $T = _increment_freq($i, $alphabet, $freq, $cf);
+        $T = _increment_freq($i, $alphabet_size, $freq, $cf);
 
         if ($high > MAX) {
             die "high > MAX: ($high > ${\MAX})";
