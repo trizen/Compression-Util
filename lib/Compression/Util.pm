@@ -45,7 +45,9 @@ our %EXPORT_TAGS = (
 
           huffman_encode
           huffman_decode
+
           huffman_from_freq
+          huffman_from_code_lengths
 
           mtf_encode
           mtf_decode
@@ -675,7 +677,7 @@ sub huffman_from_code_lengths ($code_lengths) {
     }
 
     # Step 3
-    my @code_table = map { [0, 0] } 1 .. scalar(@$code_lengths);
+    my @code_table;
     foreach my $n (0 .. $#{$code_lengths}) {
         my $length = $code_lengths->[$n];
         if ($length != 0) {
@@ -688,13 +690,13 @@ sub huffman_from_code_lengths ($code_lengths) {
 }
 
 # produce encode and decode dictionary from a tree
-sub _huffman_walk_tree ($node, $code, $h, $rev_h) {
+sub _huffman_walk_tree ($node, $code, $h) {
 
-    my $c = $node->[0] // return ($h, $rev_h);
-    if (ref $c) { __SUB__->($c->[$_], $code . $_, $h, $rev_h) for ('0', '1') }
-    else        { $h->{$c} = $code; $rev_h->{$code} = $c }
+    my $c = $node->[0] // return $h;
+    if (ref $c) { __SUB__->($c->[$_], $code . $_, $h) for ('0', '1') }
+    else        { $h->{$c} = $code }
 
-    return ($h, $rev_h);
+    return $h;
 }
 
 # make a tree, and return resulting dictionaries
@@ -715,7 +717,22 @@ sub huffman_from_freq ($freq) {
         }
     } while (@nodes > 1);
 
-    _huffman_walk_tree($nodes[0], '', {}, {});
+    my $h = _huffman_walk_tree($nodes[0], '', {});
+
+    my @sorted     = sort { ($a->[0] <=> $b->[0]) || ($a->[1] <=> $b->[1]) } map { [length($h->{$_}), $_] } keys %$h;
+    my @keys       = map  { $_->[1] } @sorted;
+    my @lengths    = map  { $_->[0] } @sorted;
+    my $code_table = huffman_from_code_lengths(\@lengths);
+
+    my %dict;
+    my %rev_dict;
+
+    foreach my $i (0 .. $#keys) {
+        $dict{$keys[$i]} = $code_table->[$i];
+        $rev_dict{$code_table->[$i]} = $keys[$i];
+    }
+
+    return (\%dict, \%rev_dict);
 }
 
 sub huffman_encode ($symbols, $dict) {
@@ -724,7 +741,16 @@ sub huffman_encode ($symbols, $dict) {
 
 sub huffman_decode ($bits, $rev_dict) {
     local $" = '|';
-    [split(' ', $bits =~ s/(@{[sort { length($a) <=> length($b) } keys %$rev_dict]})/$rev_dict->{$1} /gr)];    # very fast
+    [
+     split(
+         ' ', $bits =~ s{(@{[
+        map  { $_->[1] }
+        sort { $a->[0] <=> $b->[0] }
+        map  { [length($_), $_] }
+        keys %$rev_dict]
+    })}{$rev_dict->{$1} }gr
+          )
+    ];
 }
 
 sub create_huffman_entry ($symbols, $out_fh = undef) {
@@ -738,13 +764,13 @@ sub create_huffman_entry ($symbols, $out_fh = undef) {
     my $max_symbol = max(keys %freq) // 0;
     $VERBOSE && say STDERR "Max symbol: $max_symbol\n";
 
-    my @freqs;
+    my @code_lengths;
     foreach my $i (0 .. $max_symbol) {
-        push @freqs, $freq{$i} // 0;
+        push @code_lengths, length($dict->{$i} // '');
     }
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh delta_encode(\@freqs);
+    print $out_fh delta_encode(\@code_lengths);
     print $out_fh pack("N",  length($enc));
     print $out_fh pack("B*", $enc);
     return $out_str;
@@ -757,22 +783,22 @@ sub decode_huffman_entry ($fh) {
         return __SUB__->($fh2);
     }
 
-    my @freqs = @{delta_decode($fh)};
+    my $code_lengths = delta_decode($fh);
+    my $code_table   = huffman_from_code_lengths($code_lengths);
 
-    my %freq;
-    foreach my $i (0 .. $#freqs) {
-        if ($freqs[$i]) {
-            $freq{$i} = $freqs[$i];
+    my %rev_dict;
+    foreach my $i (0 .. $#{$code_lengths}) {
+        my $code = $code_table->[$i];
+        if (defined($code)) {
+            $rev_dict{$code} = $i;
         }
     }
-
-    my (undef, $rev_dict) = huffman_from_freq(\%freq);
 
     my $enc_len = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
     $VERBOSE && say STDERR "Encoded length: $enc_len\n";
 
     if ($enc_len > 0) {
-        return huffman_decode(read_bits($fh, $enc_len), $rev_dict);
+        return huffman_decode(read_bits($fh, $enc_len), \%rev_dict);
     }
 
     return [];
@@ -1621,14 +1647,14 @@ sub bwt_decode_symbolic ($bwt, $idx) {    # fast inversion
     my @tail = @$bwt;
     my @head = sort { $a <=> $b } @tail;
 
-    my @indices;
+    my %indices;
     foreach my $i (0 .. $#tail) {
-        push @{$indices[$tail[$i]]}, $i;
+        push @{$indices{$tail[$i]}}, $i;
     }
 
     my @table;
     foreach my $v (@head) {
-        push @table, shift(@{$indices[$v]});
+        push @table, shift(@{$indices{$v}});
     }
 
     my @dec;
@@ -1650,7 +1676,6 @@ sub encode_alphabet ($alphabet) {
         return (chr(1) . _encode_alphabet_256($alphabet));
     }
 
-    # TODO: encode the alphabet more efficiently when max_symbol >= 256
     return (chr(0) . delta_encode($alphabet));
 }
 
@@ -2469,7 +2494,7 @@ The encoding of input and output file-handles must be set to C<:raw>.
       huffman_encode(\@symbols, \%dict)    # Huffman encoding
       huffman_decode($bitstring, \%dict)   # Huffman decoding, given a string of bits
       huffman_from_freq(\%freq)            # Create Huffman dictionaries, given an hash of frequencies
-      huffman_from_code_lengths(\@lens)    # Create cannonical Huffman codes, given an array of code lengths
+      huffman_from_code_lengths(\@lens)    # Create canonical Huffman codes, given an array of code lengths
 
       make_deflate_tables($size)           # Returns the DEFLATE tables for distance and length symbols
       find_deflate_index($value, \@table)  # Returns the index in a DEFLATE table, given a numerical value
@@ -3090,7 +3115,7 @@ The function returns two values: C<$dict>, which represents the constructed Huff
 
     my $huffman_codes = huffman_from_freq(\@code_lengths);
 
-Low-level function that returns an array of cannonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
+Low-level function that returns an array of canonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
 
 It takes a single parameter, C<\@code_lengths>, where entry C<$i> in the array corresponds to the code length for symbol C<$i>.
 

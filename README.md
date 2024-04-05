@@ -208,7 +208,7 @@ The encoding of input and output file-handles must be set to `:raw`.
       huffman_encode(\@symbols, \%dict)    # Huffman encoding
       huffman_decode($bitstring, \%dict)   # Huffman decoding, given a string of bits
       huffman_from_freq(\%freq)            # Create Huffman dictionaries, given an hash of frequencies
-      huffman_from_code_lengths(\@lens)    # Create cannonical Huffman codes, given an array of code lengths
+      huffman_from_code_lengths(\@lens)    # Create canonical Huffman codes, given an array of code lengths
 
       make_deflate_tables($size)           # Returns the DEFLATE tables for distance and length symbols
       find_deflate_index($value, \@table)  # Returns the index in a DEFLATE table, given a numerical value
@@ -951,7 +951,7 @@ The function returns two values: `$dict`, which represents the constructed Huffm
     my $huffman_codes = huffman_from_freq(\@code_lengths);
 ```
 
-Low-level function that returns an array of cannonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
+Low-level function that returns an array of canonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
 
 It takes a single parameter, `\@code_lengths`, where entry `$i` in the array corresponds to the code length for symbol `$i`.
 
