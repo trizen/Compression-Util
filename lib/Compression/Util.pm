@@ -686,7 +686,18 @@ sub huffman_from_code_lengths ($code_lengths) {
         }
     }
 
-    return \@code_table;
+    my %dict;
+    my %rev_dict;
+
+    foreach my $i (0 .. $#{$code_lengths}) {
+        my $code = $code_table[$i];
+        if (defined($code)) {
+            $dict{$i}        = $code;
+            $rev_dict{$code} = $i;
+        }
+    }
+
+    return (\%dict, \%rev_dict);
 }
 
 # produce encode and decode dictionary from a tree
@@ -719,20 +730,17 @@ sub huffman_from_freq ($freq) {
 
     my $h = _huffman_walk_tree($nodes[0], '', {});
 
-    my @sorted     = sort { ($a->[0] <=> $b->[0]) || ($a->[1] <=> $b->[1]) } map { [length($h->{$_}), $_] } keys %$h;
-    my @keys       = map  { $_->[1] } @sorted;
-    my @lengths    = map  { $_->[0] } @sorted;
-    my $code_table = huffman_from_code_lengths(\@lengths);
-
-    my %dict;
-    my %rev_dict;
-
-    foreach my $i (0 .. $#keys) {
-        $dict{$keys[$i]} = $code_table->[$i];
-        $rev_dict{$code_table->[$i]} = $keys[$i];
+    my @code_lengths;
+    foreach my $i (0 .. max(keys %$freq)) {
+        if (exists $h->{$i}) {
+            $code_lengths[$i] = length($h->{$i});
+        }
+        else {
+            $code_lengths[$i] = 0;
+        }
     }
 
-    return (\%dict, \%rev_dict);
+    return huffman_from_code_lengths(\@code_lengths);
 }
 
 sub huffman_encode ($symbols, $dict) {
@@ -766,7 +774,12 @@ sub create_huffman_entry ($symbols, $out_fh = undef) {
 
     my @code_lengths;
     foreach my $i (0 .. $max_symbol) {
-        push @code_lengths, length($dict->{$i} // '');
+        if (exists($dict->{$i})) {
+            $code_lengths[$i] = length($dict->{$i});
+        }
+        else {
+            $code_lengths[$i] = 0;
+        }
     }
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
@@ -784,21 +797,13 @@ sub decode_huffman_entry ($fh) {
     }
 
     my $code_lengths = delta_decode($fh);
-    my $code_table   = huffman_from_code_lengths($code_lengths);
-
-    my %rev_dict;
-    foreach my $i (0 .. $#{$code_lengths}) {
-        my $code = $code_table->[$i];
-        if (defined($code)) {
-            $rev_dict{$code} = $i;
-        }
-    }
+    my ($dict, $rev_dict) = huffman_from_code_lengths($code_lengths);
 
     my $enc_len = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
     $VERBOSE && say STDERR "Encoded length: $enc_len\n";
 
     if ($enc_len > 0) {
-        return huffman_decode(read_bits($fh, $enc_len), \%rev_dict);
+        return huffman_decode(read_bits($fh, $enc_len), $rev_dict);
     }
 
     return [];
@@ -3105,7 +3110,7 @@ There is probably no need to call this function explicitly. Use C<bwt_encode_sym
 
     my ($dict, $rev_dict) = huffman_from_freq(\%freq);
 
-Low-level function that constructs a Huffman tree based on the frequency of symbols provided in a hash table.
+Low-level function that constructs a Huffman dictionary based on the frequency of symbols provided in a hash table.
 
 It takes a single parameter, C<\%freq>, representing the hash table where keys are symbols, and values are their corresponding frequencies.
 
@@ -3113,11 +3118,13 @@ The function returns two values: C<$dict>, which represents the constructed Huff
 
 =head2 huffman_from_code_lengths
 
-    my $huffman_codes = huffman_from_freq(\@code_lengths);
+    my ($dict, $rev_dict) = huffman_from_code_lengths(\@code_lengths);
 
-Low-level function that returns an array of canonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
+Low-level function that constructs a dictionary of canonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
 
 It takes a single parameter, C<\@code_lengths>, where entry C<$i> in the array corresponds to the code length for symbol C<$i>.
+
+The function returns two values: C<$dict>, which represents the constructed Huffman dictionary, and C<$rev_dict>, which holds the reverse mapping of Huffman codes to symbols.
 
 =head2 huffman_encode
 

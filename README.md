@@ -518,7 +518,6 @@ Inverse of `deltas()`.
 
 ```perl
     my $string = delta_encode(\@integers);
-    my $string = delta_encode(\@integers, 1);    # double
 ```
 
 Encodes a sequence of integers (including negative integers) using Delta + Run-length + Elias omega coding, returning a binary string.
@@ -939,7 +938,7 @@ There is probably no need to call this function explicitly. Use `bwt_encode_symb
     my ($dict, $rev_dict) = huffman_from_freq(\%freq);
 ```
 
-Low-level function that constructs a Huffman tree based on the frequency of symbols provided in a hash table.
+Low-level function that constructs a Huffman dictionary based on the frequency of symbols provided in a hash table.
 
 It takes a single parameter, `\%freq`, representing the hash table where keys are symbols, and values are their corresponding frequencies.
 
@@ -948,12 +947,14 @@ The function returns two values: `$dict`, which represents the constructed Huffm
 ## huffman\_from\_code\_lengths
 
 ```perl
-    my $huffman_codes = huffman_from_freq(\@code_lengths);
+    my ($dict, $rev_dict) = huffman_from_code_lengths(\@code_lengths);
 ```
 
-Low-level function that returns an array of canonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
+Low-level function that constructs a dictionary of canonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
 
 It takes a single parameter, `\@code_lengths`, where entry `$i` in the array corresponds to the code length for symbol `$i`.
+
+The function returns two values: `$dict`, which represents the constructed Huffman dictionary, and `$rev_dict`, which holds the reverse mapping of Huffman codes to symbols.
 
 ## huffman\_encode
 
