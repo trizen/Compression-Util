@@ -1854,7 +1854,7 @@ sub lzss_encode ($str) {
     my @chars  = split(//, $str);
     my $end    = $#chars;
 
-    my $min_len = 4;                          # $LENGTH_SYMBOLS->[0][0];
+    my $min_len = 3;                          # $LENGTH_SYMBOLS->[0][0];
     my $max_len = $LENGTH_SYMBOLS->[-1][0];
 
     my %literal_freq;
