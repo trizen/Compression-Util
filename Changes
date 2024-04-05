@@ -5,11 +5,13 @@ Revision history for Compression-Util
         [ADDITIONS]
 
         - Added the deltas() and its inverse, accumulate(), functions.
+        - Added the huffman_from_code_lengths() function.
 
         [CHANGES]
 
         - Simplified deflate_encode() to always return a binary string (no longer writes to a file-handle).
         - Improved the delta_encode() function to also use RLE when it's beneficial.
+        - Renamed huffman_tree_from_freq() to huffman_from_freq().
 
 0.03    2024-03-22
 

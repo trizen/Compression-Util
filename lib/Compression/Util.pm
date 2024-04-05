@@ -45,7 +45,7 @@ our %EXPORT_TAGS = (
 
           huffman_encode
           huffman_decode
-          huffman_tree_from_freq
+          huffman_from_freq
 
           mtf_encode
           mtf_decode
@@ -653,6 +653,40 @@ sub abc_decode ($fh) {
 # Huffman Coding algorithm
 ###########################
 
+sub huffman_from_code_lengths ($code_lengths) {
+
+    # This algorithm is based on the pseudocode in RFC 1951 (Section 3.2.2)
+    # (Steps are numbered as in the RFC)
+
+    # Step 1
+    my $max_length    = max(@$code_lengths);
+    my @length_counts = (0) x ($max_length + 1);
+    foreach my $length (@$code_lengths) {
+        ++$length_counts[$length];
+    }
+
+    # Step 2
+    my $code = 0;
+    $length_counts[0] = 0;
+    my @next_code = (0) x ($max_length + 1);
+    foreach my $bits (1 .. $max_length) {
+        $code = ($code + $length_counts[$bits - 1]) << 1;
+        $next_code[$bits] = $code;
+    }
+
+    # Step 3
+    my @code_table = map { [0, 0] } 1 .. scalar(@$code_lengths);
+    foreach my $n (0 .. $#{$code_lengths}) {
+        my $length = $code_lengths->[$n];
+        if ($length != 0) {
+            $code_table[$n] = sprintf('%0*b', $length, $next_code[$length]);
+            ++$next_code[$length];
+        }
+    }
+
+    return \@code_table;
+}
+
 # produce encode and decode dictionary from a tree
 sub _huffman_walk_tree ($node, $code, $h, $rev_h) {
 
@@ -664,7 +698,7 @@ sub _huffman_walk_tree ($node, $code, $h, $rev_h) {
 }
 
 # make a tree, and return resulting dictionaries
-sub huffman_tree_from_freq ($freq) {
+sub huffman_from_freq ($freq) {
 
     my @nodes = map { [$_, $freq->{$_}] } sort { $a <=> $b } keys %$freq;
 
@@ -698,7 +732,7 @@ sub create_huffman_entry ($symbols, $out_fh = undef) {
     my %freq;
     ++$freq{$_} for @$symbols;
 
-    my ($dict, $rev_dict) = huffman_tree_from_freq(\%freq);
+    my ($dict, $rev_dict) = huffman_from_freq(\%freq);
     my $enc = huffman_encode($symbols, $dict);
 
     my $max_symbol = max(keys %freq) // 0;
@@ -732,7 +766,7 @@ sub decode_huffman_entry ($fh) {
         }
     }
 
-    my (undef, $rev_dict) = huffman_tree_from_freq(\%freq);
+    my (undef, $rev_dict) = huffman_from_freq(\%freq);
 
     my $enc_len = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
     $VERBOSE && say STDERR "Encoded length: $enc_len\n";
@@ -1160,11 +1194,21 @@ sub decode_adaptive_ac_entry ($fh) {
 # Move to front transform
 ##########################
 
-sub mtf_encode ($symbols) {
+sub mtf_encode ($symbols, $alphabet = undef) {
 
     my (@C, @table);
 
-    my @alphabet      = sort { $a <=> $b } uniq(@$symbols);
+    my @alphabet;
+    my $return_alphabet = 0;
+
+    if (defined($alphabet)) {
+        @alphabet = @$alphabet;
+    }
+    else {
+        @alphabet        = sort { $a <=> $b } uniq(@$symbols);
+        $return_alphabet = 1;
+    }
+
     my @alphabet_copy = @alphabet;
 
     @table[@alphabet] = (0 .. $#alphabet);
@@ -1175,6 +1219,7 @@ sub mtf_encode ($symbols) {
         @table[@alphabet[0 .. $index]] = (0 .. $index);
     }
 
+    $return_alphabet || return \@C;
     return (\@C, \@alphabet_copy);
 }
 
@@ -2255,7 +2300,19 @@ Compression::Util - Implementation of various techniques used in data compressio
 
 =head1 DESCRIPTION
 
-B<Compression::Util> is a function-based module, implementing various techniques used in data compression, such as the Burrows-Wheeler transform, Move-to-front transform, Huffman Coding, Arithmetic Coding (in fixed bits), Run-length encoding, Fibonacci coding, Delta coding, LZ77/LZSS compression and LZW compression.
+B<Compression::Util> is a function-based module, implementing various techniques used in data compression, such as:
+
+    * Burrows-Wheeler transform
+    * Move-to-front transform
+    * Huffman Coding
+    * Arithmetic Coding (in fixed bits)
+    * Run-length encoding
+    * Fibonacci coding
+    * Elias gamma/omega coding
+    * Delta coding
+    * Bzip2-like compression
+    * LZ77/LZSS compression
+    * LZW compression
 
 The provided techniques can be easily combined in various ways to create powerful compressors, such as the Bzip2 compressor, which is a pipeline of the following methods:
 
@@ -2411,7 +2468,8 @@ The encoding of input and output file-handles must be set to C<:raw>.
 
       huffman_encode(\@symbols, \%dict)    # Huffman encoding
       huffman_decode($bitstring, \%dict)   # Huffman decoding, given a string of bits
-      huffman_tree_from_freq(\%freq)       # Create Huffman dictionaries, given an hash of frequencies
+      huffman_from_freq(\%freq)            # Create Huffman dictionaries, given an hash of frequencies
+      huffman_from_code_lengths(\@lens)    # Create cannonical Huffman codes, given an array of code lengths
 
       make_deflate_tables($size)           # Returns the DEFLATE tables for distance and length symbols
       find_deflate_index($value, \@table)  # Returns the index in a DEFLATE table, given a numerical value
@@ -2829,11 +2887,16 @@ The function returns the original sequence of symbolic elements.
 
 =head2 mtf_encode
 
+    my $mtf = mtf_encode(\@symbols, \@alphabet);
     my ($mtf, $alphabet) = mtf_encode(\@symbols);
 
 Performs Move-To-Front (MTF) encoding on a sequence of symbols.
 
-It takes one parameter: C<\@symbols>, representing the sequence of symbols to be encoded. The function returns the encoded MTF sequence and the sorted list of unique symbols in the input data, representing the alphabet.
+It takes one parameter: C<\@symbols>, representing the sequence of symbols to be encoded.
+
+The function returns the encoded MTF sequence and the sorted list of unique symbols in the input data, representing the alphabet.
+
+Optionally, the alphabet can be provided as a second argument. When two arguments are provided, only the MTF sequence is returned.
 
 =head2 mtf_decode
 
@@ -3013,9 +3076,9 @@ It takes a single parameter C<\@symbols>, which represents the input sequence of
 
 There is probably no need to call this function explicitly. Use C<bwt_encode_symbolic()> instead!
 
-=head2 huffman_tree_from_freq
+=head2 huffman_from_freq
 
-    my ($dict, $rev_dict) = huffman_tree_from_freq(\%freq);
+    my ($dict, $rev_dict) = huffman_from_freq(\%freq);
 
 Low-level function that constructs a Huffman tree based on the frequency of symbols provided in a hash table.
 
@@ -3023,11 +3086,19 @@ It takes a single parameter, C<\%freq>, representing the hash table where keys a
 
 The function returns two values: C<$dict>, which represents the constructed Huffman dictionary, and C<$rev_dict>, which holds the reverse mapping of Huffman codes to symbols.
 
+=head2 huffman_from_code_lengths
+
+    my $huffman_codes = huffman_from_freq(\@code_lengths);
+
+Low-level function that returns an array of cannonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
+
+It takes a single parameter, C<\@code_lengths>, where entry C<$i> in the array corresponds to the code length for symbol C<$i>.
+
 =head2 huffman_encode
 
     my $bits = huffman_encode(\@symbols, $dict);
 
-Low-level function that performs Huffman encoding on a sequence of symbols using a provided dictionary, returned by C<huffman_tree_from_freq()>.
+Low-level function that performs Huffman encoding on a sequence of symbols using a provided dictionary, returned by C<huffman_from_freq()>.
 
 It takes two parameters: C<\@symbols>, representing the sequence of symbols to be encoded, and C<$dict>, representing the Huffman dictionary mapping symbols to their corresponding Huffman codes.
 

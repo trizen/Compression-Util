@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 66;
+plan tests => 70;
 
 ##################################
 
@@ -102,3 +102,27 @@ test_array([shuffle((map { int(rand(100)) } 1 .. 20), (map { int(rand(1e6)) } 1 
     is($decoded, $bitstring);
     is($encoded, "1000110101110110111010011110001010101100011110101010000111101110");
 }
+
+##############################################
+
+{
+    my $str = "INEFICIENCIES";
+
+    {
+        my $encoded = mtf_encode([unpack('C*', $str)], [ord('A') .. ord('Z')]);
+        my $decoded = mtf_decode($encoded, [ord('A') .. ord('Z')]);
+
+        is(join(' ', @$encoded), '8 13 6 7 3 6 1 3 4 3 3 3 18');
+        is($str,                 pack('C*', @$decoded));
+    }
+
+    {
+        my ($encoded, $alphabet) = mtf_encode([unpack('C*', $str)]);
+        my $decoded = mtf_decode($encoded, $alphabet);
+
+        is(join(' ', @$encoded), '3 4 3 4 3 4 1 3 4 3 3 3 5');
+        is($str,                 pack('C*', @$decoded));
+    }
+}
+
+##############################################
