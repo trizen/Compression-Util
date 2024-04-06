@@ -27,6 +27,7 @@ inc/
 # ExtUtils::MakeMaker
 /blib/
 /_eumm/
+/devel/
 /*.gz
 /Makefile
 /Makefile.old
