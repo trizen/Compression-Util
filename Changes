@@ -5,6 +5,8 @@ Revision history for Compression-Util
         [ADDITIONS]
 
         - Added the deltas() and its inverse, accumulate(), functions.
+        - Added the frequencies() function.
+        - Added the huffman_from_symbols() function.
         - Added the huffman_from_code_lengths() function.
 
         [CHANGES]

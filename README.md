@@ -175,6 +175,7 @@ The encoding of input and output file-handles must be set to `:raw`.
       encode_alphabet(\@alphabet)          # Encode an alphabet of symbols into a binary string
       decode_alphabet($fh)                 # Inverse of the above method
 
+      frequencies(\@symbols)               # Returns a dictionary with symbol frequencies
       run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array
 
       rle4_encode(\@symbols, $max=255)     # Run-length encoding with 4 or more consecutive characters
@@ -207,7 +208,9 @@ The encoding of input and output file-handles must be set to `:raw`.
 
       huffman_encode(\@symbols, \%dict)    # Huffman encoding
       huffman_decode($bitstring, \%dict)   # Huffman decoding, given a string of bits
+
       huffman_from_freq(\%freq)            # Create Huffman dictionaries, given an hash of frequencies
+      huffman_from_symbols(\@symbols)      # Create Huffman dictionaries, given an array of symbols
       huffman_from_code_lengths(\@lens)    # Create canonical Huffman codes, given an array of code lengths
 
       make_deflate_tables($size)           # Returns the DEFLATE tables for distance and length symbols
@@ -497,6 +500,14 @@ Similar to `bz2_compress()`, except that it accepts an arbitrary array-ref of no
 Inverse of `bz2_compress_symbolic()`.
 
 # INTERFACE FOR MEDIUM-LEVEL FUNCTIONS
+
+## frequencies
+
+```perl
+    my $freq = frequencies(\@symbols);
+```
+
+Returns an hash ref dictionary with frequencies, given an array of symbols.
 
 ## deltas
 
@@ -938,9 +949,21 @@ There is probably no need to call this function explicitly. Use `bwt_encode_symb
     my ($dict, $rev_dict) = huffman_from_freq(\%freq);
 ```
 
-Low-level function that constructs a Huffman dictionary based on the frequency of symbols provided in a hash table.
+Low-level function that constructs Huffman prefix codes, based on the frequency of symbols provided in a hash table.
 
 It takes a single parameter, `\%freq`, representing the hash table where keys are symbols, and values are their corresponding frequencies.
+
+The function returns two values: `$dict`, which represents the constructed Huffman dictionary, and `$rev_dict`, which holds the reverse mapping of Huffman codes to symbols.
+
+## huffman\_from\_symbols
+
+```perl
+    my ($dict, $rev_dict) = huffman_from_symbols(\@symbols);
+```
+
+Low-level function that constructs Huffman prefix codes, given an array of symbols.
+
+It takes a single parameter, `\@symbols`. Interanlly, it computes the frequency of each symbols and generates the Huffman prefix codes.
 
 The function returns two values: `$dict`, which represents the constructed Huffman dictionary, and `$rev_dict`, which holds the reverse mapping of Huffman codes to symbols.
 

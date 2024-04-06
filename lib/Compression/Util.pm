@@ -47,6 +47,7 @@ our %EXPORT_TAGS = (
           huffman_decode
 
           huffman_from_freq
+          huffman_from_symbols
           huffman_from_code_lengths
 
           mtf_encode
@@ -54,6 +55,10 @@ our %EXPORT_TAGS = (
 
           encode_alphabet
           decode_alphabet
+
+          deltas
+          accumulate
+          frequencies
 
           run_length
 
@@ -150,6 +155,12 @@ sub read_bits ($fh, $bits_len) {
     }
 
     return $data;
+}
+
+sub frequencies ($symbols) {
+    my %freq;
+    ++$freq{$_} for @$symbols;
+    return \%freq;
 }
 
 sub deltas ($integers) {
@@ -743,6 +754,10 @@ sub huffman_from_freq ($freq) {
     return huffman_from_code_lengths(\@code_lengths);
 }
 
+sub huffman_from_symbols ($symbols) {
+    huffman_from_freq(frequencies($symbols));
+}
+
 sub huffman_encode ($symbols, $dict) {
     join('', @{$dict}{@$symbols});
 }
@@ -763,13 +778,10 @@ sub huffman_decode ($bits, $rev_dict) {
 
 sub create_huffman_entry ($symbols, $out_fh = undef) {
 
-    my %freq;
-    ++$freq{$_} for @$symbols;
-
-    my ($dict, $rev_dict) = huffman_from_freq(\%freq);
+    my ($dict, $rev_dict) = huffman_from_symbols($symbols);
     my $enc = huffman_encode($symbols, $dict);
 
-    my $max_symbol = max(keys %freq) // 0;
+    my $max_symbol = max(keys %$dict) // 0;
     $VERBOSE && say STDERR "Max symbol: $max_symbol\n";
 
     my @code_lengths;
@@ -834,10 +846,8 @@ sub ac_encode ($symbols) {
     my $EOF_SYMBOL = (max(@$symbols) // 0) + 1;
     my @bytes      = (@$symbols, $EOF_SYMBOL);
 
-    my %freq;
-    ++$freq{$_} for @bytes;
-
-    my ($cf, $T) = _create_cfreq(\%freq);
+    my $freq = frequencies(\@bytes);
+    my ($cf, $T) = _create_cfreq($freq);
 
     if ($T > MAX) {
         die "Too few bits: $T > ${\MAX}";
@@ -897,7 +907,7 @@ sub ac_encode ($symbols) {
         $enc .= '1';
     }
 
-    return ($enc, \%freq);
+    return ($enc, $freq);
 }
 
 sub ac_decode ($fh, $freq) {
@@ -2468,6 +2478,7 @@ The encoding of input and output file-handles must be set to C<:raw>.
       encode_alphabet(\@alphabet)          # Encode an alphabet of symbols into a binary string
       decode_alphabet($fh)                 # Inverse of the above method
 
+      frequencies(\@symbols)               # Returns a dictionary with symbol frequencies
       run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array
 
       rle4_encode(\@symbols, $max=255)     # Run-length encoding with 4 or more consecutive characters
@@ -2498,7 +2509,9 @@ The encoding of input and output file-handles must be set to C<:raw>.
 
       huffman_encode(\@symbols, \%dict)    # Huffman encoding
       huffman_decode($bitstring, \%dict)   # Huffman decoding, given a string of bits
+
       huffman_from_freq(\%freq)            # Create Huffman dictionaries, given an hash of frequencies
+      huffman_from_symbols(\@symbols)      # Create Huffman dictionaries, given an array of symbols
       huffman_from_code_lengths(\@lens)    # Create canonical Huffman codes, given an array of code lengths
 
       make_deflate_tables($size)           # Returns the DEFLATE tables for distance and length symbols
@@ -2751,6 +2764,12 @@ Similar to C<bz2_compress()>, except that it accepts an arbitrary array-ref of n
 Inverse of C<bz2_compress_symbolic()>.
 
 =head1 INTERFACE FOR MEDIUM-LEVEL FUNCTIONS
+
+=head2 frequencies
+
+    my $freq = frequencies(\@symbols);
+
+Returns an hash ref dictionary with frequencies, given an array of symbols.
 
 =head2 deltas
 
@@ -3110,9 +3129,19 @@ There is probably no need to call this function explicitly. Use C<bwt_encode_sym
 
     my ($dict, $rev_dict) = huffman_from_freq(\%freq);
 
-Low-level function that constructs a Huffman dictionary based on the frequency of symbols provided in a hash table.
+Low-level function that constructs Huffman prefix codes, based on the frequency of symbols provided in a hash table.
 
 It takes a single parameter, C<\%freq>, representing the hash table where keys are symbols, and values are their corresponding frequencies.
+
+The function returns two values: C<$dict>, which represents the constructed Huffman dictionary, and C<$rev_dict>, which holds the reverse mapping of Huffman codes to symbols.
+
+=head2 huffman_from_symbols
+
+    my ($dict, $rev_dict) = huffman_from_symbols(\@symbols);
+
+Low-level function that constructs Huffman prefix codes, given an array of symbols.
+
+It takes a single parameter, C<\@symbols>. Interanlly, it computes the frequency of each symbols and generates the Huffman prefix codes.
 
 The function returns two values: C<$dict>, which represents the constructed Huffman dictionary, and C<$rev_dict>, which holds the reverse mapping of Huffman codes to symbols.
 
