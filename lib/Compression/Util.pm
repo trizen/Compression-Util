@@ -672,7 +672,7 @@ sub huffman_from_code_lengths ($code_lengths) {
     # (Steps are numbered as in the RFC)
 
     # Step 1
-    my $max_length    = max(@$code_lengths);
+    my $max_length    = max(@$code_lengths) // 0;
     my @length_counts = (0) x ($max_length + 1);
     foreach my $length (@$code_lengths) {
         ++$length_counts[$length];
@@ -724,7 +724,8 @@ sub _huffman_walk_tree ($node, $code, $h) {
 # make a tree, and return resulting dictionaries
 sub huffman_from_freq ($freq) {
 
-    my @nodes = map { [$_, $freq->{$_}] } sort { $a <=> $b } keys %$freq;
+    my @nodes      = map { [$_, $freq->{$_}] } sort { $a <=> $b } keys %$freq;
+    my $max_symbol = scalar(@nodes) ? $nodes[-1][0] : -1;
 
     do {    # poor man's priority queue
         @nodes = sort { $a->[1] <=> $b->[1] } @nodes;
@@ -742,7 +743,7 @@ sub huffman_from_freq ($freq) {
     my $h = _huffman_walk_tree($nodes[0], '', {});
 
     my @code_lengths;
-    foreach my $i (0 .. max(keys %$freq)) {
+    foreach my $i (0 .. $max_symbol) {
         if (exists $h->{$i}) {
             $code_lengths[$i] = length($h->{$i});
         }
@@ -1059,9 +1060,10 @@ sub _increment_freq ($c, $alphabet_size, $freq, $cf) {
 
 sub adaptive_ac_encode ($symbols) {
 
-    my $enc      = '';
-    my @bytes    = (@$symbols, (max(@$symbols) // 0) + 1);
-    my @alphabet = sort { $a <=> $b } uniq(@bytes);
+    my $enc        = '';
+    my @alphabet   = sort { $a <=> $b } uniq(@$symbols);
+    my $EOF_SYMBOL = scalar(@alphabet) ? ($alphabet[-1] + 1) : 1;
+    push @alphabet, $EOF_SYMBOL;
 
     my $alphabet_size = $#alphabet;
     my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet_size);
@@ -1077,7 +1079,7 @@ sub adaptive_ac_encode ($symbols) {
     my $high     = MAX;
     my $uf_count = 0;
 
-    foreach my $value (@bytes) {
+    foreach my $value (@$symbols, $EOF_SYMBOL) {
 
         my $c = $table{$value};
         my $w = $high - $low + 1;
@@ -1240,6 +1242,7 @@ sub mtf_encode ($symbols, $alphabet = undef) {
     my (@C, @table);
 
     my @alphabet;
+    my @alphabet_copy;
     my $return_alphabet = 0;
 
     if (defined($alphabet)) {
@@ -1248,9 +1251,8 @@ sub mtf_encode ($symbols, $alphabet = undef) {
     else {
         @alphabet        = sort { $a <=> $b } uniq(@$symbols);
         $return_alphabet = 1;
+        @alphabet_copy   = @alphabet;
     }
-
-    my @alphabet_copy = @alphabet;
 
     @table[@alphabet] = (0 .. $#alphabet);
 
@@ -1421,31 +1423,33 @@ sub binary_vrl_decode ($bitstring) {
 # RLE4 used in Bzip2
 #####################
 
-sub rle4_encode ($bytes, $max_run = 255) {    # RLE1
+sub rle4_encode ($symbols, $max_run = 255) {    # RLE1
 
-    my @rle;
-    my $end  = $#{$bytes};
-    my $prev = -1;
-    my $run  = 0;
+    my $end = $#{$symbols};
+    return [] if ($end < 0);
 
-    for (my $i = 0 ; $i <= $end ; ++$i) {
+    my $prev = $symbols->[0];
+    my $run  = 1;
+    my @rle  = ($prev);
 
-        if ($bytes->[$i] == $prev) {
+    for (my $i = 1 ; $i <= $end ; ++$i) {
+
+        if ($symbols->[$i] == $prev) {
             ++$run;
         }
         else {
-            $run = 1;
+            $run  = 1;
+            $prev = $symbols->[$i];
         }
 
-        push @rle, $bytes->[$i];
-        $prev = $bytes->[$i];
+        push @rle, $prev;
 
         if ($run >= 4) {
 
             $run = 0;
             $i += 1;
 
-            while ($run < $max_run and $i <= $end and $bytes->[$i] == $prev) {
+            while ($run < $max_run and $i <= $end and $symbols->[$i] == $prev) {
                 ++$run;
                 ++$i;
             }
@@ -1454,8 +1458,8 @@ sub rle4_encode ($bytes, $max_run = 255) {    # RLE1
             $run = 1;
 
             if ($i <= $end) {
-                $prev = $bytes->[$i];
-                push @rle, $bytes->[$i];
+                $prev = $symbols->[$i];
+                push @rle, $symbols->[$i];
             }
         }
     }
@@ -1463,28 +1467,30 @@ sub rle4_encode ($bytes, $max_run = 255) {    # RLE1
     return \@rle;
 }
 
-sub rle4_decode ($bytes) {    # RLE1
+sub rle4_decode ($symbols) {    # RLE1
 
-    my @dec  = $bytes->[0];
-    my $end  = $#{$bytes};
-    my $prev = $bytes->[0];
+    my $end = $#{$symbols};
+    return [] if ($end < 0);
+
+    my @dec  = $symbols->[0];
+    my $prev = $symbols->[0];
     my $run  = 1;
 
     for (my $i = 1 ; $i <= $end ; ++$i) {
 
-        if ($bytes->[$i] == $prev) {
+        if ($symbols->[$i] == $prev) {
             ++$run;
         }
         else {
-            $run = 1;
+            $run  = 1;
+            $prev = $symbols->[$i];
         }
 
-        push @dec, $bytes->[$i];
-        $prev = $bytes->[$i];
+        push @dec, $prev;
 
         if ($run >= 4) {
             if (++$i <= $end) {
-                $run = $bytes->[$i];
+                $run = $symbols->[$i];
                 push @dec, (($prev) x $run);
             }
 
@@ -1499,15 +1505,15 @@ sub rle4_decode ($bytes) {    # RLE1
 # Zero Run-length encoding
 ###########################
 
-sub zrle_encode ($bytes) {    # RLE2
+sub zrle_encode ($symbols) {    # RLE2
 
     my @rle;
-    my $end = $#{$bytes};
+    my $end = $#{$symbols};
 
     for (my $i = 0 ; $i <= $end ; ++$i) {
 
         my $run = 0;
-        while ($i <= $end and $bytes->[$i] == 0) {
+        while ($i <= $end and $symbols->[$i] == 0) {
             ++$run;
             ++$i;
         }
@@ -1518,7 +1524,7 @@ sub zrle_encode ($bytes) {    # RLE2
         }
 
         if ($i <= $end) {
-            push @rle, $bytes->[$i] + 1;
+            push @rle, $symbols->[$i] + 1;
         }
     }
 
@@ -1571,13 +1577,7 @@ sub _encode_alphabet_256 ($alphabet) {
 
         if ($enc > 0) {
             $populated |= 1;
-
-            if ($enc == 0xffffffff) {
-                push @marked, -1;    # fixes an warning in delta_encode()
-            }
-            else {
-                push @marked, $enc;
-            }
+            push @marked, 0xffffffff - $enc;
         }
     }
 
@@ -1596,7 +1596,7 @@ sub _encode_alphabet_256 ($alphabet) {
 sub _decode_alphabet_256 ($fh) {
 
     my @populated = split(//, sprintf('%08b', ord(getc($fh))));
-    my @marked    = map { ($_ == -1) ? 0xffffffff : $_ } @{delta_decode($fh)};
+    my @marked    = map { 0xffffffff - $_ } @{delta_decode($fh)};
 
     my @alphabet;
     for (my $i = 0 ; $i <= 255 ; $i += 32) {
@@ -1685,7 +1685,7 @@ sub bwt_decode_symbolic ($bwt, $idx) {    # fast inversion
 
 sub encode_alphabet ($alphabet) {
 
-    my $max_symbol = max(@$alphabet);
+    my $max_symbol = max(@$alphabet) // -1;
 
     if ($max_symbol <= 255) {
         return (chr(1) . _encode_alphabet_256($alphabet));
@@ -1731,7 +1731,7 @@ sub bz2_compress_symbolic ($symbols, $out_fh = undef, $entropy_sub = \&create_hu
 
     print $out_fh pack('N', $idx);
     print $out_fh encode_alphabet($alphabet);
-    $entropy_sub->($rle, $out_fh);
+    print $out_fh $entropy_sub->($rle);
 
     return $out_str;
 }
@@ -1772,7 +1772,7 @@ sub bz2_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry
 
     print $out_fh pack('N', $idx);
     print $out_fh encode_alphabet($alphabet);
-    $entropy_sub->($rle, $out_fh);
+    print $out_fh $entropy_sub->($rle);
 
     return $out_str;
 }
@@ -2110,8 +2110,8 @@ sub deflate_encode ($literals, $distances, $lengths, $entropy_sub = \&create_huf
 
     open my $out_fh, '>:raw', \my $out_str;
     print $out_fh pack('N', $size);
-    $entropy_sub->(\@len_symbols,  $out_fh);
-    $entropy_sub->(\@dist_symbols, $out_fh);
+    print $out_fh $entropy_sub->(\@len_symbols);
+    print $out_fh $entropy_sub->(\@dist_symbols);
     print $out_fh pack('B*', $offset_bits);
     return $out_str;
 }
@@ -2171,7 +2171,7 @@ sub deflate_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
 
 sub obh_encode ($distances, $entropy_sub = \&create_huffman_entry) {
 
-    my $size = max(@$distances);
+    my $size = max(@$distances) // 0;
     my ($DISTANCE_SYMBOLS) = make_deflate_tables($size);
 
     my @symbols;
@@ -2191,7 +2191,7 @@ sub obh_encode ($distances, $entropy_sub = \&create_huffman_entry) {
 
     open my $out_fh, '>:raw', \my $out_str;
     print $out_fh pack('N', $size);
-    $entropy_sub->(\@symbols, $out_fh);
+    print $out_fh $entropy_sub->(\@symbols);
     print $out_fh pack('B*', $offset_bits);
     return $out_str;
 }
@@ -2262,8 +2262,8 @@ sub lzhd_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entr
     my ($literals, $indices, $lengths) = lz77_encode($chunk);
     $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (4 * scalar(@$literals)));
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    $entropy_sub->($literals, $out_fh);
-    $entropy_sub->($lengths,  $out_fh);
+    print $out_fh $entropy_sub->($literals);
+    print $out_fh $entropy_sub->($lengths);
     print $out_fh obh_encode($indices, $entropy_sub);
     return $out_str;
 }
@@ -2375,10 +2375,9 @@ This functionality is provided by the function C<bz2_compress()>, which can be e
     my ($mtf, $alphabet) = mtf_encode([unpack("C*", $bwt)]);
     my $rle = zrle_encode($mtf);
 
-    open my $out_fh, '>:raw', \my $enc;
-    print $out_fh pack('N', $idx);
-    print $out_fh encode_alphabet($alphabet);
-    create_huffman_entry($rle, $out_fh);
+    my $enc = pack('N', $idx)
+            . encode_alphabet($alphabet)
+            . create_huffman_entry($rle);
 
     say "Original size  : ", length($data);
     say "Compressed size: ", length($enc);

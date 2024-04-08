@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 70;
+plan tests => 114;
 
 ##################################
 
@@ -13,6 +13,7 @@ sub test_array ($arr) {
 
     my @copy = @$arr;
 
+    is_deeply(mtf_decode(mtf_encode($arr)),                      $arr);
     is_deeply(abc_decode(abc_encode($arr)),                      $arr);
     is_deeply(ac_decode(ac_encode($arr)),                        $arr);
     is_deeply(adaptive_ac_decode(adaptive_ac_encode($arr)),      $arr);
@@ -20,10 +21,12 @@ sub test_array ($arr) {
     is_deeply(elias_omega_decode(elias_omega_encode($arr)),      $arr);
     is_deeply(fibonacci_decode(fibonacci_encode($arr)),          $arr);
     is_deeply(delta_decode(delta_encode($arr)),                  $arr);
-    is_deeply(rle4_decode(rle4_decode($arr)),                    $arr);
+    is_deeply(rle4_decode(rle4_encode($arr)),                    $arr);
+    is_deeply(zrle_decode(zrle_encode($arr)),                    $arr);
     is_deeply([map { ($_->[0]) x $_->[1] } @{run_length($arr)}], $arr);
 
     is_deeply(obh_decode(obh_encode($arr)), $arr);
+    is_deeply(obh_decode(obh_encode($arr, \&obh_encode),               \&obh_decode),               $arr);
     is_deeply(obh_decode(obh_encode($arr, \&create_ac_entry),          \&decode_ac_entry),          $arr);
     is_deeply(obh_decode(obh_encode($arr, \&create_adaptive_ac_entry), \&decode_adaptive_ac_entry), $arr);
 
@@ -34,8 +37,9 @@ sub test_array ($arr) {
     is_deeply($arr, \@copy);    # make sure the array has not been modified in-place
 }
 
-#test_array([]); # FIXME
+test_array([]);
 test_array([1]);
+test_array([0]);
 test_array([shuffle((map { int(rand(100)) } 1 .. 20), (map { int(rand(1e6)) } 1 .. 10), 0, 5, 9, 999_999, 1_000_000, 1_000_001, 42, 1)]);
 
 ##################################
