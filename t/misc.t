@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 114;
+plan tests => 125;
 
 ##################################
 
@@ -41,6 +41,20 @@ test_array([]);
 test_array([1]);
 test_array([0]);
 test_array([shuffle((map { int(rand(100)) } 1 .. 20), (map { int(rand(1e6)) } 1 .. 10), 0, 5, 9, 999_999, 1_000_000, 1_000_001, 42, 1)]);
+
+is(bz2_decompress(bz2_compress('a')),   'a');
+is(lzss_decompress(lzss_compress('a')), 'a');
+is(lzhd_decompress(lzhd_compress('a')), 'a');
+is(lzw_decompress(lzw_compress('a')),   'a');
+
+is(bz2_decompress(bz2_compress('')),   '');
+is(lzss_decompress(lzss_compress('')), '');
+is(lzhd_decompress(lzhd_compress('')), '');
+is(lzw_decompress(lzw_compress('')),   '');
+
+is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic([1])), [1]);
+is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic([0])), [0]);
+is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic([])),  []);
 
 ##################################
 

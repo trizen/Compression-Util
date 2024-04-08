@@ -1797,9 +1797,8 @@ sub bz2_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry)
     my $data = rle4_decode([unpack('C*', $rle4)]);
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-
     print $out_fh pack('C*', @$data);
-    return $out_str;
+    return $out_str // '';
 }
 
 ##########################
@@ -2039,6 +2038,8 @@ sub lzw_encode ($uncompressed) {
 
 sub lzw_decode ($compressed) {
 
+    @$compressed || return '';
+
     # Build the dictionary
     my $dict_size  = 256;
     my @dictionary = map { chr($_) } 0 .. $dict_size - 1;
@@ -2071,7 +2072,7 @@ sub lzw_decode ($compressed) {
 
 sub deflate_encode ($literals, $distances, $lengths, $entropy_sub = \&create_huffman_entry) {
 
-    my $size = max(@$distances);
+    my $size = max(@$distances) // 0;
     my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables($size);
 
     my @len_symbols;
@@ -2253,7 +2254,7 @@ sub lz77_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry
     my ($literals, $indices, $lengths) = deflate_decode($fh, $entropy_sub);
     $out_fh // open $out_fh, '>:raw', \my $out_str;
     print $out_fh lz77_decode($literals, $indices, $lengths);
-    return $out_str;
+    return $out_str // '';
 }
 
 *lzss_decompress = \&lz77_decompress;
@@ -2281,7 +2282,7 @@ sub lzhd_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
     print $out_fh lz77_decode($literals, $indices, $lengths);
-    return $out_str;
+    return $out_str // '';
 }
 
 sub lzw_compress ($chunk, $out_fh = undef, $enc_method = \&abc_encode) {
@@ -2299,7 +2300,7 @@ sub lzw_decompress ($fh, $out_fh = undef, $dec_method = \&abc_decode) {
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
     print $out_fh lzw_decode($dec_method->($fh));
-    return $out_str;
+    return $out_str // '';
 }
 
 1;
@@ -3140,7 +3141,7 @@ The function returns two values: C<$dict>, which represents the constructed Huff
 
 Low-level function that constructs Huffman prefix codes, given an array of symbols.
 
-It takes a single parameter, C<\@symbols>. Interanlly, it computes the frequency of each symbols and generates the Huffman prefix codes.
+It takes a single parameter, C<\@symbols>, from which it computes the frequency of each symbol and generates the corresponding Huffman prefix codes.
 
 The function returns two values: C<$dict>, which represents the constructed Huffman dictionary, and C<$rev_dict>, which holds the reverse mapping of Huffman codes to symbols.
 
