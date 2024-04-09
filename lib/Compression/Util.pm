@@ -1872,7 +1872,7 @@ sub lzss_encode ($str) {
     my $literal_count  = 0;
     my $distance_count = 0;
 
-    my (@literals, @indices, @lengths);
+    my (@literals, @distances, @lengths);
 
     while ($la <= $end) {
 
@@ -1916,9 +1916,9 @@ sub lzss_encode ($str) {
 
         if ($n >= $min_len and $enc_bits_len <= $literal_bits_len) {
 
-            push @lengths,  $n;
-            push @indices,  $la - $p;
-            push @literals, ord($chars[$la + $n]);
+            push @lengths,   $n;
+            push @distances, $la - $p;
+            push @literals,  ord($chars[$la + $n]);
 
             my $dist = $DISTANCE_SYMBOLS->[$distance_index];
 
@@ -1935,8 +1935,8 @@ sub lzss_encode ($str) {
         else {
             my @bytes = unpack('C*', substr($prefix, $p, $n) . $chars[$la + $n]);
 
-            push @lengths, (0) x scalar(@bytes);
-            push @indices, (0) x scalar(@bytes);
+            push @lengths,   (0) x scalar(@bytes);
+            push @distances, (0) x scalar(@bytes);
             push @literals, @bytes;
             ++$literal_freq{$_} for @bytes;
 
@@ -1946,7 +1946,7 @@ sub lzss_encode ($str) {
         }
     }
 
-    return (\@literals, \@indices, \@lengths);
+    return (\@literals, \@distances, \@lengths);
 }
 
 sub lz77_encode ($str) {
@@ -1957,7 +1957,7 @@ sub lz77_encode ($str) {
     my @chars  = split(//, $str);
     my $end    = $#chars;
 
-    my (@literals, @indices, @lengths);
+    my (@literals, @distances, @lengths);
 
     while ($la <= $end) {
 
@@ -1976,23 +1976,23 @@ sub lz77_encode ($str) {
         }
 
         --$n;
-        push @indices,  $la - $p;
-        push @lengths,  $n;
-        push @literals, ord($chars[$la + $n]);
+        push @distances, $la - $p;
+        push @lengths,   $n;
+        push @literals,  ord($chars[$la + $n]);
         $la += $n + 1;
         $prefix .= $token;
     }
 
-    return (\@literals, \@indices, \@lengths);
+    return (\@literals, \@distances, \@lengths);
 }
 
-sub lz77_decode ($literals, $indices, $lengths) {
+sub lz77_decode ($literals, $distances, $lengths) {
 
     my $chunk  = '';
     my $offset = 0;
 
     foreach my $i (0 .. $#$literals) {
-        $chunk .= substr($chunk, $offset - $indices->[$i], $lengths->[$i]) . chr($literals->[$i]);
+        $chunk .= substr($chunk, $offset - $distances->[$i], $lengths->[$i]) . chr($literals->[$i]);
         $offset += $lengths->[$i] + 1;
     }
 
@@ -2229,18 +2229,18 @@ sub obh_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
 ###################
 
 sub lzss_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
-    my ($literals, $indices, $lengths) = lzss_encode($chunk);
-    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$indices)));
+    my ($literals, $distances, $lengths) = lzss_encode($chunk);
+    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$distances)));
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh deflate_encode($literals, $indices, $lengths, $entropy_sub);
+    print $out_fh deflate_encode($literals, $distances, $lengths, $entropy_sub);
     return $out_str;
 }
 
 sub lz77_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
-    my ($literals, $indices, $lengths) = lz77_encode($chunk);
-    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$indices)));
+    my ($literals, $distances, $lengths) = lz77_encode($chunk);
+    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$distances)));
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh deflate_encode($literals, $indices, $lengths, $entropy_sub);
+    print $out_fh deflate_encode($literals, $distances, $lengths, $entropy_sub);
     return $out_str;
 }
 
@@ -2251,21 +2251,21 @@ sub lz77_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry
         return __SUB__->($fh2, $out_fh, $entropy_sub);
     }
 
-    my ($literals, $indices, $lengths) = deflate_decode($fh, $entropy_sub);
+    my ($literals, $distances, $lengths) = deflate_decode($fh, $entropy_sub);
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh lz77_decode($literals, $indices, $lengths);
+    print $out_fh lz77_decode($literals, $distances, $lengths);
     return $out_str // '';
 }
 
 *lzss_decompress = \&lz77_decompress;
 
 sub lzhd_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
-    my ($literals, $indices, $lengths) = lz77_encode($chunk);
+    my ($literals, $distances, $lengths) = lz77_encode($chunk);
     $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (4 * scalar(@$literals)));
     $out_fh // open $out_fh, '>:raw', \my $out_str;
     print $out_fh $entropy_sub->($literals);
     print $out_fh $entropy_sub->($lengths);
-    print $out_fh obh_encode($indices, $entropy_sub);
+    print $out_fh obh_encode($distances, $entropy_sub);
     return $out_str;
 }
 
@@ -2276,12 +2276,12 @@ sub lzhd_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry
         return __SUB__->($fh2, $out_fh, $entropy_sub);
     }
 
-    my $literals = $entropy_sub->($fh);
-    my $lengths  = $entropy_sub->($fh);
-    my $indices  = obh_decode($fh, $entropy_sub);
+    my $literals  = $entropy_sub->($fh);
+    my $lengths   = $entropy_sub->($fh);
+    my $distances = obh_decode($fh, $entropy_sub);
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh lz77_decode($literals, $indices, $lengths);
+    print $out_fh lz77_decode($literals, $distances, $lengths);
     return $out_str // '';
 }
 
@@ -2431,13 +2431,13 @@ The encoding of input and output file-handles must be set to C<:raw>.
       bz2_compress_symbolic(\@symbols)     # Bzip2-like compression (RLE4+sBWT+MTF+ZRLE+Huffman coding)
       bz2_decompress_symbolic($fh)         # Inverse of the above method
 
-      lz77_compress($string)               # LZ77 + DEFLATE-like encoding of indices and lengths
+      lz77_compress($string)               # LZ77 + DEFLATE-like encoding of distances and lengths
       lz77_decompress($fh)                 # Inverse of the above method
 
-      lzss_compress($string)               # LZSS + DEFLATE-like encoding of indices and lengths
+      lzss_compress($string)               # LZSS + DEFLATE-like encoding of distances and lengths
       lzss_decompress($fh)                 # Inverse of the above method
 
-      lzhd_compress($string)               # LZ77 + Huffman coding of lengths and literals + OBH for indices
+      lzhd_compress($string)               # LZ77 + Huffman coding of lengths and literals + OBH for distances
       lzhd_decompress($fh)                 # Inverse of the above method
 
       lzw_compress($string)                # LZW + abc_encode() compression
@@ -2517,8 +2517,8 @@ The encoding of input and output file-handles must be set to C<:raw>.
       make_deflate_tables($size)           # Returns the DEFLATE tables for distance and length symbols
       find_deflate_index($value, \@table)  # Returns the index in a DEFLATE table, given a numerical value
 
-      lz77_encode($string)                 # LZ77 compression of a string into literals, indices and lengths
-      lzss_encode($string)                 # LZSS compression of a string into literals, indices and lengths
+      lz77_encode($string)                 # LZ77 compression of a string into literals, distances and lengths
+      lzss_encode($string)                 # LZSS compression of a string into literals, distances and lengths
       lz77_decode(\@lits, \@idxs, \@lens)  # Inverse of the above two methods
 
       deflate_encode(\@lits, \@idxs, \@lens)  # DEFLATE-like encoding of values returned by lzss_encode()
@@ -2647,7 +2647,7 @@ High-level function that performs LZ77 (Lempel-Ziv 1977) compression on the prov
     1. lz77_encode
     2. create_huffman_entry(literals)
     3. create_huffman_entry(lengths)
-    4. obh_encode(indices)
+    4. obh_encode(distances)
 
 It takes a single parameter, C<$data>, representing the data string to be compressed.
 
@@ -2879,7 +2879,7 @@ Inverse of C<abc_encode()>.
 
 Encodes a sequence of non-negative integers using offset bits and Huffman coding.
 
-This method is particularly effective in encoding a sequence of moderately large random integers, such as the list of indices returned by C<lz77_encode()>.
+This method is particularly effective in encoding a sequence of moderately large random integers, such as the list of distances returned by C<lz77_encode()>.
 
 =head2 obh_decode
 
@@ -3177,13 +3177,13 @@ The function returns the decoded sequence of symbols as an array-ref.
 
 =head2 lzss_encode
 
-    my ($literals, $indices, $lengths) = lzss_encode($data);
+    my ($literals, $distances, $lengths) = lzss_encode($data);
 
 Low-level function that performs LZSS (Lempel-Ziv-Storer-Szymanski) compression on the provided data.
 
 It takes a single parameter, C<$data>, representing the data string to be compressed.
 
-The function returns three values: C<$literals>, which is an array-ref of uncompressed bytes, C<$indices>, which contains the indices of the back-references, and C<$lengths>, which holds the lengths of the matched sub-strings.
+The function returns three values: C<$literals>, which is an array-ref of uncompressed bytes, C<$distances>, which contains the relative back-reference distances, and C<$lengths>, which holds the lengths of the matched sub-strings.
 
 A back-reference is returned only when it's beneficial (i.e.: when it may not inflate the data). Otherwise, the corresponding index and length are both set to C<0>.
 
@@ -3191,24 +3191,24 @@ The output can be decompressed with C<lz77_decode()>.
 
 =head2 lz77_encode
 
-    my ($literals, $indices, $lengths) = lz77_encode($data);
+    my ($literals, $distances, $lengths) = lz77_encode($data);
 
 Low-level function that performs LZ77 (Lempel-Ziv 1977) compression on the provided data.
 
 It takes a single parameter, C<$data>, representing the data string to be compressed.
 
-The function returns three values: C<$literals>, which is an array-ref of uncompressed bytes, C<$indices>, which contains the indices of the matched sub-strings, and C<$lengths>, which holds the lengths of the matched sub-strings.
+The function returns three values: C<$literals>, which is an array-ref of uncompressed bytes, C<$distances>, which contains the relative back-reference distances of the matched sub-strings, and C<$lengths>, which holds the lengths of the matched sub-strings.
 
 Lengths are limited to C<255>.
 
 =head2 lz77_decode / lzss_decode
 
-    my $data = lz77_decode($literals, $indices, $lengths);
-    my $data = lzss_decode($literals, $indices, $lengths);
+    my $data = lz77_decode($literals, $distances, $lengths);
+    my $data = lzss_decode($literals, $distances, $lengths);
 
-Low-level function that performs LZ77 (Lempel-Ziv 1977) decompression using the provided literals, indices, and lengths of matched sub-strings.
+Low-level function that performs LZ77 (Lempel-Ziv 1977) decompression using the provided literals, distances, and lengths of matched sub-strings.
 
-It takes three parameters: C<$literals>, representing the array-ref of uncompressed bytes, C<$indices>, containing the indices of the matched sub-strings, and C<$lengths>, holding the lengths of the matched sub-strings.
+It takes three parameters: C<$literals>, representing the array-ref of uncompressed bytes, C<$distances>, containing the relative back-reference distances of the matched sub-strings, and C<$lengths>, holding the lengths of the matched sub-strings.
 
 The function returns the decompressed data as a string.
 
@@ -3225,12 +3225,12 @@ An optional argument can be provided as C<\&create_ac_entry> to use Arithmetic C
 =head2 deflate_decode
 
     # Huffman decoding
-    my ($literals, $indices, $lengths) = deflate_decode($fh);
-    my ($literals, $indices, $lengths) = deflate_decode($string);
+    my ($literals, $distances, $lengths) = deflate_decode($fh);
+    my ($literals, $distances, $lengths) = deflate_decode($string);
 
     # Arithmetic decoding
-    my ($literals, $indices, $lengths) = deflate_decode($fh, \&decode_ac_entry);
-    my ($literals, $indices, $lengths) = deflate_decode($string, \&decode_ac_entry);
+    my ($literals, $distances, $lengths) = deflate_decode($fh, \&decode_ac_entry);
+    my ($literals, $distances, $lengths) = deflate_decode($string, \&decode_ac_entry);
 
 Inverse of C<deflate_encode()>.
 
@@ -3238,7 +3238,7 @@ Inverse of C<deflate_encode()>.
 
     my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables($size);
 
-Low-level function that returns a list of tables used in encoding the indices and lengths returned by C<lz77_encode()> and C<lzss_encode()>.
+Low-level function that returns a list of tables used in encoding the relative back-reference distances and lengths returned by C<lz77_encode()> and C<lzss_encode()>.
 
 There is no need to call this function explicitly. Use C<deflate_encode()> instead!
 
