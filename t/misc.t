@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 125;
+plan tests => 127;
 
 ##################################
 
@@ -144,3 +144,19 @@ is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic([])),  []);
 }
 
 ##############################################
+
+{
+    my $int    = int(rand(1e6));
+    my $binary = pack('b*', int2bits_lsb($int, 32));
+    open my $fh, '<:raw', \$binary;
+    my $dec = bits2int_lsb($fh, 32, \my $buffer);
+    is($int, $dec);
+}
+
+{
+    my $int    = int(rand(1e6));
+    my $binary = pack('B*', int2bits($int, 32));
+    open my $fh, '<:raw', \$binary;
+    my $dec = bits2int($fh, 32, \my $buffer);
+    is($int, $dec);
+}

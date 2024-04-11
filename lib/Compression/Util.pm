@@ -20,7 +20,16 @@ our %EXPORT_TAGS = (
     'all' => [
         qw(
           read_bit
+          read_bit_lsb
+
           read_bits
+          read_bits_lsb
+
+          int2bits
+          int2bits_lsb
+
+          bits2int
+          bits2int_lsb
 
           bwt_encode
           bwt_decode
@@ -140,6 +149,15 @@ sub read_bit ($fh, $bitstring) {
     chop($$bitstring);
 }
 
+sub read_bit_lsb ($fh, $bitstring) {
+
+    if (($$bitstring // '') eq '') {
+        $$bitstring = unpack('B*', getc($fh) // die "can't read bit");
+    }
+
+    chop($$bitstring);
+}
+
 sub read_bits ($fh, $bits_len) {
 
     my $data = '';
@@ -155,6 +173,39 @@ sub read_bits ($fh, $bits_len) {
     }
 
     return $data;
+}
+
+sub read_bits_lsb ($fh, $bits_len) {
+
+    my $data = '';
+    read($fh, $data, $bits_len >> 3);
+    $data = unpack('b*', $data);
+
+    while (length($data) < $bits_len) {
+        $data .= unpack('b*', getc($fh) // die "can't read bits");
+    }
+
+    if (length($data) > $bits_len) {
+        $data = substr($data, 0, $bits_len);
+    }
+
+    return $data;
+}
+
+sub int2bits ($value, $size) {
+    sprintf("%0*b", $size, $value);
+}
+
+sub int2bits_lsb ($value, $size) {
+    scalar reverse sprintf("%0*b", $size, $value);
+}
+
+sub bits2int ($fh, $size, $buffer) {
+    oct('0b' . join('', map { read_bit($fh, $buffer) } 1 .. $size));
+}
+
+sub bits2int_lsb ($fh, $size, $buffer) {
+    oct('0b' . reverse(join('', map { read_bit_lsb($fh, $buffer) } 1 .. $size)));
 }
 
 sub frequencies ($symbols) {
@@ -2457,8 +2508,17 @@ The encoding of input and output file-handles must be set to C<:raw>.
 
 =head1 LOW-LEVEL FUNCTIONS
 
-      read_bit($fh, \$buffer)              # Read one bit from file-handle
-      read_bits($fh, $len)                 # Read `$len` bits from file-handle
+      read_bit($fh, \$buffer)              # Read one bit from file-handle (MSB)
+      read_bit_lsb($fh, \$buffer)          # Read one bit from file-handle (LSB)
+
+      read_bits($fh, $len)                 # Read `$len` bits from file-handle (MSB)
+      read_bits_lsb($fh, $len)             # Read `$len` bits from file-handle (LSB)
+
+      int2bits($symbol, $size)             # Convert an integer to bits of width `$size` (MSB)
+      int2bits_lsb($symbol, $size)         # Convert an integer to bits of width `$size) (LSB)
+
+      bits2int($fh, $size, \$buffer)       # Inverse of `int2bits()`
+      bits2int_lsb($fh, $size, \$buffer)   # Inverse of `int2bits_lsb()`
 
       binary_vrl_encode($bitstring)        # Binary variable run-length encoding
       binary_vrl_decode($bitstring)        # Binary variable run-length decoding
@@ -3039,7 +3099,15 @@ It takes a single parameter, C<\@symbols>, representing the encoded symbols to b
 
     my $bit = read_bit($fh, \$buffer);
 
-Reads a single bit from a file-handle C<$fh>.
+Reads a single bit from a file-handle C<$fh> (MSB order).
+
+The function stores the extra bits inside the C<$buffer>, reading one character at a time from the filehandle.
+
+=head2 read_bit_lsb
+
+    my $bit = read_bit_lsb($fh, \$buffer);
+
+Reads a single bit from a file-handle C<$fh> (LSB order).
 
 The function stores the extra bits inside the C<$buffer>, reading one character at a time from the filehandle.
 
@@ -3047,7 +3115,37 @@ The function stores the extra bits inside the C<$buffer>, reading one character 
 
     my $bitstring = read_bits($fh, $bits_len);
 
-Reads a specified number of bits (C<$bits_len>) from a file-handle (C<$fh>) and returns them as a string.
+Reads a specified number of bits (C<$bits_len>) from a file-handle (C<$fh>) and returns them as a string, in MSB order.
+
+=head2 read_bits_lsb
+
+    my $bitstring = read_bits_lsb($fh, $bits_len);
+
+Reads a specified number of bits (C<$bits_len>) from a file-handle (C<$fh>) and returns them as a string, in LSB order.
+
+=head2 int2bits
+
+    my $bitstring = int2bits($symbol, $size)
+
+Convert a non-negative integer to a bitstring of width C<$size>, in MSB order.
+
+=head2 int2bits_lsb
+
+    my $bitstring = int2bits_lsb($symbol, $size)
+
+Convert a non-negative integer to a bitstring of width C<$size>, in LSB order.
+
+=head2 bits2int
+
+    my $integer = int2bits($fh, $size, \$buffer)
+
+Read C<$size> bits from C<$fh> and convert them to an integer, in MSB order. Inverse of C<int2bits()>.
+
+=head2 bits2int_lsb
+
+    my $integer = int2bits_lsb($fh, $size, \$buffer)
+
+Read C<$size> bits from C<$fh> and convert them to an integer, in LSB order. Inverse of C<int2bits_lsb()>.
 
 =head2 binary_vrl_encode
 
