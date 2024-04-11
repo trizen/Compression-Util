@@ -5,7 +5,7 @@
 # Edit: 05 April 2024
 # https://github.com/trizen
 
-# Create a valid Gzip container, using DEFLATE's Block Type 1 with LZ77 + fixed-length prefix codes.
+# Create a valid Gzip container, using DEFLATE's Block Type 1: LZSS + fixed-length prefix codes.
 
 # Reference:
 #   Data Compression (Summer 2023) - Lecture 11 - DEFLATE (gzip)
@@ -66,6 +66,10 @@ my ($dict)      = huffman_from_code_lengths(\@code_lengths);
 my ($dist_dict) = huffman_from_code_lengths([(5) x 32]);
 
 my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables(WINDOW_SIZE);
+
+if (eof($in_fh)) {    # empty file
+    $bitstring = '1' . '10' . $dict->{256};
+}
 
 while (read($in_fh, (my $chunk), WINDOW_SIZE)) {
 
