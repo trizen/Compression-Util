@@ -31,6 +31,8 @@ our %EXPORT_TAGS = (
           bits2int
           bits2int_lsb
 
+          read_null_terminated
+
           bwt_encode
           bwt_decode
 
@@ -190,6 +192,16 @@ sub read_bits_lsb ($fh, $bits_len) {
     }
 
     return $data;
+}
+
+sub read_null_terminated ($fh) {
+    my $string = '';
+    while (1) {
+        my $c = getc($fh) // die "can't read character";
+        last if $c eq "\0";
+        $string .= $c;
+    }
+    return $string;
 }
 
 sub int2bits ($value, $size) {
@@ -2520,6 +2532,8 @@ The encoding of input and output file-handles must be set to C<:raw>.
       bits2int($fh, $size, \$buffer)       # Inverse of `int2bits()`
       bits2int_lsb($fh, $size, \$buffer)   # Inverse of `int2bits_lsb()`
 
+      read_null_terminated($fh)            # Read a binary string that ends with NULL ("\0")
+
       binary_vrl_encode($bitstring)        # Binary variable run-length encoding
       binary_vrl_decode($bitstring)        # Binary variable run-length decoding
 
@@ -3137,15 +3151,21 @@ Convert a non-negative integer to a bitstring of width C<$size>, in LSB order.
 
 =head2 bits2int
 
-    my $integer = int2bits($fh, $size, \$buffer)
+    my $integer = bits2int($fh, $size, \$buffer)
 
-Read C<$size> bits from C<$fh> and convert them to an integer, in MSB order. Inverse of C<int2bits()>.
+Read C<$size> bits from file-handle C<$fh> and convert them to an integer, in MSB order. Inverse of C<int2bits()>.
 
 =head2 bits2int_lsb
 
-    my $integer = int2bits_lsb($fh, $size, \$buffer)
+    my $integer = bits2int_lsb($fh, $size, \$buffer)
 
-Read C<$size> bits from C<$fh> and convert them to an integer, in LSB order. Inverse of C<int2bits_lsb()>.
+Read C<$size> bits from file-handle C<$fh> and convert them to an integer, in LSB order. Inverse of C<int2bits_lsb()>.
+
+=head2 read_null_terminated
+
+    my $string = read_null_terminated($fh)
+
+Read a string from file-handle C<$fh> that ends with a NULL character ("\0").
 
 =head2 binary_vrl_encode
 

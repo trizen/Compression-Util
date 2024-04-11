@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 127;
+plan tests => 130;
 
 ##################################
 
@@ -159,4 +159,19 @@ is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic([])),  []);
     open my $fh, '<:raw', \$binary;
     my $dec = bits2int($fh, 32, \my $buffer);
     is($int, $dec);
+}
+
+##############################################
+
+{
+    my $str = "foo\0bar\0abracadabra\0";
+    open my $fh, '<:raw', \$str;
+
+    my $word1 = read_null_terminated($fh);
+    my $word2 = read_null_terminated($fh);
+    my $word3 = read_null_terminated($fh);
+
+    is($word1, "foo");
+    is($word2, "bar");
+    is($word3, "abracadabra");
 }
