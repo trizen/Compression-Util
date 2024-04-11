@@ -20,7 +20,6 @@ provides:
 requires:
   Exporter: '0'
   List::Util: '1.45'
-  POSIX: '0'
   Test::More: '0'
   perl: v5.36.0
 resources:

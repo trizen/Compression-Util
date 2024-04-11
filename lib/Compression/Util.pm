@@ -1853,8 +1853,6 @@ sub make_deflate_tables ($size) {
 
 sub lzss_encode ($str) {
 
-    require POSIX;    # for ceil() and log2()
-
     my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables(length($str));
 
     my $la = 0;
@@ -1865,12 +1863,6 @@ sub lzss_encode ($str) {
 
     my $min_len = 3;                          # $LENGTH_SYMBOLS->[0][0];
     my $max_len = $LENGTH_SYMBOLS->[-1][0];
-
-    my %literal_freq;
-    my %distance_freq;
-
-    my $literal_count  = 0;
-    my $distance_count = 0;
 
     my (@literals, @distances, @lengths);
 
@@ -1892,44 +1884,13 @@ sub lzss_encode ($str) {
 
         --$n;
 
-        my $enc_bits_len     = 0;
-        my $literal_bits_len = 0;
-        my $distance_index   = 0;
-
         if ($n >= $min_len) {
-
-            $distance_index = find_deflate_index($la - $p, $DISTANCE_SYMBOLS);
-            my $dist = $DISTANCE_SYMBOLS->[$distance_index];
-            $enc_bits_len += $dist->[1] + POSIX::ceil(POSIX::log2((1 + $distance_count) / (1 + ($distance_freq{$dist->[0]} // 0))));
-
-            my $len_idx = $LENGTH_INDICES->[$n];
-            my $len     = $LENGTH_SYMBOLS->[$len_idx];
-
-            $enc_bits_len += $len->[1] + POSIX::ceil(POSIX::log2((1 + $literal_count) / (1 + ($literal_freq{$len_idx + 256} // 0))));
-
-            my %freq;
-            foreach my $c (unpack('C*', substr($prefix, $p, $n))) {
-                ++$freq{$c};
-                $literal_bits_len += POSIX::ceil(POSIX::log2(($n + $literal_count) / ($freq{$c} + ($literal_freq{$c} // 0))));
-            }
-        }
-
-        if ($n >= $min_len and $enc_bits_len <= $literal_bits_len) {
 
             push @lengths,   $n;
             push @distances, $la - $p;
             push @literals,  ord($chars[$la + $n]);
 
-            my $dist = $DISTANCE_SYMBOLS->[$distance_index];
-
-            ++$distance_count;
-            ++$distance_freq{$dist->[0]};
-
-            ++$literal_freq{$LENGTH_INDICES->[$n] + 256};
-            ++$literal_freq{$literals[-1]};
-
-            $literal_count += 2;
-            $la            += $n + 1;
+            $la += $n + 1;
             $prefix .= $token;
         }
         else {
@@ -1938,10 +1899,8 @@ sub lzss_encode ($str) {
             push @lengths,   (0) x scalar(@bytes);
             push @distances, (0) x scalar(@bytes);
             push @literals, @bytes;
-            ++$literal_freq{$_} for @bytes;
 
-            $literal_count += $n + 1;
-            $la            += $n + 1;
+            $la += $n + 1;
             $prefix .= $token;
         }
     }
