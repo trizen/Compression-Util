@@ -708,7 +708,7 @@ sub huffman_from_code_lengths ($code_lengths) {
         }
     }
 
-    return (\%dict, \%rev_dict);
+    return (wantarray ? (\%dict, \%rev_dict) : \%dict);
 }
 
 # produce encode and decode dictionary from a tree
@@ -752,7 +752,7 @@ sub huffman_from_freq ($freq) {
         }
     }
 
-    return huffman_from_code_lengths(\@code_lengths);
+    huffman_from_code_lengths(\@code_lengths);
 }
 
 sub huffman_from_symbols ($symbols) {
@@ -779,8 +779,8 @@ sub huffman_decode ($bits, $rev_dict) {
 
 sub create_huffman_entry ($symbols, $out_fh = undef) {
 
-    my ($dict, $rev_dict) = huffman_from_symbols($symbols);
-    my $enc = huffman_encode($symbols, $dict);
+    my $dict = huffman_from_symbols($symbols);
+    my $enc  = huffman_encode($symbols, $dict);
 
     my $max_symbol = max(keys %$dict) // 0;
     $VERBOSE && say STDERR "Max symbol: $max_symbol\n";
@@ -810,7 +810,7 @@ sub decode_huffman_entry ($fh) {
     }
 
     my $code_lengths = delta_decode($fh);
-    my ($dict, $rev_dict) = huffman_from_code_lengths($code_lengths);
+    my (undef, $rev_dict) = huffman_from_code_lengths($code_lengths);
 
     my $enc_len = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
     $VERBOSE && say STDERR "Encoded length: $enc_len\n";
@@ -3127,6 +3127,7 @@ There is probably no need to call this function explicitly. Use C<bwt_encode_sym
 
 =head2 huffman_from_freq
 
+    my $dict = huffman_from_freq(\%freq);
     my ($dict, $rev_dict) = huffman_from_freq(\%freq);
 
 Low-level function that constructs Huffman prefix codes, based on the frequency of symbols provided in a hash table.
@@ -3135,8 +3136,11 @@ It takes a single parameter, C<\%freq>, representing the hash table where keys a
 
 The function returns two values: C<$dict>, which represents the constructed Huffman dictionary, and C<$rev_dict>, which holds the reverse mapping of Huffman codes to symbols.
 
+The prefix codes are in canonical form, as defined in RFC 1951 (Section 3.2.2).
+
 =head2 huffman_from_symbols
 
+    my $dict = huffman_from_symbols(\@symbols);
     my ($dict, $rev_dict) = huffman_from_symbols(\@symbols);
 
 Low-level function that constructs Huffman prefix codes, given an array of symbols.
@@ -3145,8 +3149,11 @@ It takes a single parameter, C<\@symbols>, from which it computes the frequency 
 
 The function returns two values: C<$dict>, which represents the constructed Huffman dictionary, and C<$rev_dict>, which holds the reverse mapping of Huffman codes to symbols.
 
+The prefix codes are in canonical form, as defined in RFC 1951 (Section 3.2.2).
+
 =head2 huffman_from_code_lengths
 
+    my $dict = huffman_from_code_lengths(\@code_lengths);
     my ($dict, $rev_dict) = huffman_from_code_lengths(\@code_lengths);
 
 Low-level function that constructs a dictionary of canonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
@@ -3157,7 +3164,7 @@ The function returns two values: C<$dict>, which represents the constructed Huff
 
 =head2 huffman_encode
 
-    my $bits = huffman_encode(\@symbols, $dict);
+    my $bitstring = huffman_encode(\@symbols, $dict);
 
 Low-level function that performs Huffman encoding on a sequence of symbols using a provided dictionary, returned by C<huffman_from_freq()>.
 
@@ -3167,11 +3174,11 @@ The function returns a concatenated string of 1s and 0s, representing the Huffma
 
 =head2 huffman_decode
 
-    my $symbols = huffman_decode($bits, $rev_dict);
+    my $symbols = huffman_decode($bitstring, $rev_dict);
 
 Low-level function that decodes a Huffman-encoded binary string into a sequence of symbols using a provided reverse dictionary.
 
-It takes two parameters: C<$bits>, representing the Huffman-encoded string of 1s and 0s, as returned by C<huffman_encode()>, and C<$rev_dict>, representing the reverse dictionary mapping Huffman codes to their corresponding symbols.
+It takes two parameters: C<$bitstring>, representing the Huffman-encoded string of 1s and 0s, as returned by C<huffman_encode()>, and C<$rev_dict>, representing the reverse dictionary mapping Huffman codes to their corresponding symbols.
 
 The function returns the decoded sequence of symbols as an array-ref.
 
