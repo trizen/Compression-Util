@@ -142,6 +142,10 @@ our %EXPORT_TAGS = (
 our @EXPORT_OK = (@{$EXPORT_TAGS{'all'}});
 our @EXPORT;
 
+##########################
+# Misc low-level functions
+##########################
+
 sub read_bit ($fh, $bitstring) {
 
     if (($$bitstring // '') eq '') {
@@ -194,16 +198,6 @@ sub read_bits_lsb ($fh, $bits_len) {
     return $data;
 }
 
-sub read_null_terminated ($fh) {
-    my $string = '';
-    while (1) {
-        my $c = getc($fh) // die "can't read character";
-        last if $c eq "\0";
-        $string .= $c;
-    }
-    return $string;
-}
-
 sub int2bits ($value, $size) {
     sprintf("%0*b", $size, $value);
 }
@@ -218,6 +212,16 @@ sub bits2int ($fh, $size, $buffer) {
 
 sub bits2int_lsb ($fh, $size, $buffer) {
     oct('0b' . reverse(join('', map { read_bit_lsb($fh, $buffer) } 1 .. $size)));
+}
+
+sub read_null_terminated ($fh) {
+    my $string = '';
+    while (1) {
+        my $c = getc($fh) // die "can't read character";
+        last if $c eq "\0";
+        $string .= $c;
+    }
+    return $string;
 }
 
 sub frequencies ($symbols) {
@@ -251,6 +255,792 @@ sub accumulate ($deltas) {
 
     return \@acc;
 }
+
+########################
+# Fibonacci Coding
+########################
+
+sub fibonacci_encode ($symbols) {
+
+    my $bitstring = '';
+
+    foreach my $n (scalar(@$symbols), @$symbols) {
+        my ($f1, $f2, $f3) = (0, 1, 1);
+        my ($rn, $s, $k) = ($n + 1, '', 2);
+        for (; $f3 <= $rn ; ++$k) {
+            ($f1, $f2, $f3) = ($f2, $f3, $f2 + $f3);
+        }
+        foreach my $i (1 .. $k - 2) {
+            ($f3, $f2, $f1) = ($f2, $f1, $f2 - $f1);
+            if ($f3 <= $rn) {
+                $rn -= $f3;
+                $s .= '1';
+            }
+            else {
+                $s .= '0';
+            }
+        }
+        $bitstring .= reverse($s) . '1';
+    }
+
+    pack('B*', $bitstring);
+}
+
+sub fibonacci_decode ($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    my @symbols;
+
+    my $enc      = '';
+    my $prev_bit = '0';
+
+    my $len    = 0;
+    my $buffer = '';
+
+    for (my $k = 0 ; $k <= $len ;) {
+        my $bit = read_bit($fh, \$buffer);
+
+        if ($bit eq '1' and $prev_bit eq '1') {
+            my ($value, $f1, $f2) = (0, 1, 1);
+            foreach my $bit (split //, $enc) {
+                $value += $f2 if $bit;
+                ($f1, $f2) = ($f2, $f1 + $f2);
+            }
+            push @symbols, $value - 1;
+            $len      = pop @symbols if (++$k == 1);
+            $enc      = '';
+            $prev_bit = '0';
+        }
+        else {
+            $enc .= $bit;
+            $prev_bit = $bit;
+        }
+    }
+
+    return \@symbols;
+}
+
+#######################################
+# Adaptive Binary Concatenation method
+#######################################
+
+sub abc_encode ($integers) {
+
+    my @counts;
+    my $count           = 0;
+    my $bits_width      = 1;
+    my $bits_max_symbol = 1 << $bits_width;
+    my $processed_len   = 0;
+
+    foreach my $k (@$integers) {
+        while ($k >= $bits_max_symbol) {
+
+            if ($count > 0) {
+                push @counts, [$bits_width, $count];
+                $processed_len += $count;
+            }
+
+            $count = 0;
+            $bits_max_symbol *= 2;
+            $bits_width      += 1;
+        }
+        ++$count;
+    }
+
+    push @counts, grep { $_->[1] > 0 } [$bits_width, scalar(@$integers) - $processed_len];
+
+    $VERBOSE && say STDERR "Bit sizes: ", join(' ', map { $_->[0] } @counts);
+    $VERBOSE && say STDERR "Lengths  : ", join(' ', map { $_->[1] } @counts);
+    $VERBOSE && say STDERR '';
+
+    my $compressed = fibonacci_encode([(map { $_->[0] } @counts), (map { $_->[1] } @counts)]);
+
+    my $bits = '';
+    my @ints = @$integers;
+
+    foreach my $pair (@counts) {
+        my ($blen, $len) = @$pair;
+        foreach my $symbol (splice(@ints, 0, $len)) {
+            $bits .= sprintf("%0*b", $blen, $symbol);
+        }
+    }
+
+    $compressed .= pack('B*', $bits);
+    return $compressed;
+}
+
+sub abc_decode ($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    my $ints = fibonacci_decode($fh);
+    my $half = scalar(@$ints) >> 1;
+
+    my @counts;
+    foreach my $i (0 .. ($half - 1)) {
+        push @counts, [$ints->[$i], $ints->[$half + $i]];
+    }
+
+    my $bits_len = 0;
+
+    foreach my $pair (@counts) {
+        my ($blen, $len) = @$pair;
+        $bits_len += $blen * $len;
+    }
+
+    my $bits = read_bits($fh, $bits_len);
+
+    my @integers;
+    foreach my $pair (@counts) {
+        my ($blen, $len) = @$pair;
+        foreach my $chunk (unpack(sprintf('(a%d)*', $blen), substr($bits, 0, $blen * $len, ''))) {
+            push @integers, oct('0b' . $chunk);
+        }
+    }
+
+    return \@integers;
+}
+
+###################################
+# Arithmetic Coding (in fixed bits)
+###################################
+
+sub _create_cfreq ($freq) {
+
+    my @cf;
+    my $T = 0;
+
+    foreach my $i (sort { $a <=> $b } keys %$freq) {
+        $freq->{$i} // next;
+        $cf[$i] = $T;
+        $T += $freq->{$i};
+        $cf[$i + 1] = $T;
+    }
+
+    return (\@cf, $T);
+}
+
+sub ac_encode ($symbols) {
+
+    my $enc        = '';
+    my $EOF_SYMBOL = (max(@$symbols) // 0) + 1;
+    my @bytes      = (@$symbols, $EOF_SYMBOL);
+
+    my $freq = frequencies(\@bytes);
+    my ($cf, $T) = _create_cfreq($freq);
+
+    if ($T > MAX) {
+        die "Too few bits: $T > ${\MAX}";
+    }
+
+    my $low      = 0;
+    my $high     = MAX;
+    my $uf_count = 0;
+
+    foreach my $c (@bytes) {
+
+        my $w = $high - $low + 1;
+
+        $high = ($low + int(($w * $cf->[$c + 1]) / $T) - 1) & MAX;
+        $low  = ($low + int(($w * $cf->[$c]) / $T)) & MAX;
+
+        if ($high > MAX) {
+            die "high > MAX: $high > ${\MAX}";
+        }
+
+        if ($low >= $high) { die "$low >= $high" }
+
+        while (1) {
+
+            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
+
+                my $bit = $high >> (BITS - 1);
+                $enc .= $bit;
+
+                if ($uf_count > 0) {
+                    $enc .= join('', 1 - $bit) x $uf_count;
+                    $uf_count = 0;
+                }
+
+                $low <<= 1;
+                ($high <<= 1) |= 1;
+            }
+            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
+                ($high <<= 1) |= (1 << (BITS - 1));
+                $high |= 1;
+                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
+                ++$uf_count;
+            }
+            else {
+                last;
+            }
+
+            $low  &= MAX;
+            $high &= MAX;
+        }
+    }
+
+    $enc .= '0';
+    $enc .= '1';
+
+    while (length($enc) % 8 != 0) {
+        $enc .= '1';
+    }
+
+    return ($enc, $freq);
+}
+
+sub ac_decode ($fh, $freq) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $freq);
+    }
+
+    my ($cf, $T) = _create_cfreq($freq);
+
+    my @dec;
+    my $low  = 0;
+    my $high = MAX;
+    my $enc  = oct('0b' . join '', map { getc($fh) // 1 } 1 .. BITS);
+
+    my @table;
+    foreach my $i (sort { $a <=> $b } keys %$freq) {
+        foreach my $j ($cf->[$i] .. $cf->[$i + 1] - 1) {
+            $table[$j] = $i;
+        }
+    }
+
+    my $EOF_SYMBOL = max(keys %$freq) // 0;
+
+    while (1) {
+
+        my $w  = $high - $low + 1;
+        my $ss = int((($T * ($enc - $low + 1)) - 1) / $w);
+
+        my $i = $table[$ss] // last;
+        last if ($i == $EOF_SYMBOL);
+
+        push @dec, $i;
+
+        $high = ($low + int(($w * $cf->[$i + 1]) / $T) - 1) & MAX;
+        $low  = ($low + int(($w * $cf->[$i]) / $T)) & MAX;
+
+        if ($high > MAX) {
+            die "error";
+        }
+
+        if ($low >= $high) { die "$low >= $high" }
+
+        while (1) {
+
+            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
+                ($high <<= 1) |= 1;
+                $low <<= 1;
+                ($enc <<= 1) |= (getc($fh) // 1);
+            }
+            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
+                ($high <<= 1) |= (1 << (BITS - 1));
+                $high |= 1;
+                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
+                $enc = (($enc >> (BITS - 1)) << (BITS - 1)) | (($enc & ((1 << (BITS - 2)) - 1)) << 1) | (getc($fh) // 1);
+            }
+            else {
+                last;
+            }
+
+            $low  &= MAX;
+            $high &= MAX;
+            $enc  &= MAX;
+        }
+    }
+
+    return \@dec;
+}
+
+#############################################
+# Adaptive Arithemtic Coding (in fixed bits)
+#############################################
+
+sub _create_adaptive_cfreq ($freq_value, $alphabet_size) {
+
+    my $T = 0;
+    my (@cf, @freq);
+
+    foreach my $i (0 .. $alphabet_size) {
+        $freq[$i] = $freq_value;
+        $cf[$i]   = $T;
+        $T += $freq_value;
+        $cf[$i + 1] = $T;
+    }
+
+    return (\@freq, \@cf, $T);
+}
+
+sub _increment_freq ($c, $alphabet_size, $freq, $cf) {
+
+    ++$freq->[$c];
+    my $T = $cf->[$c];
+
+    foreach my $i ($c .. $alphabet_size) {
+        $cf->[$i] = $T;
+        $T += $freq->[$i];
+        $cf->[$i + 1] = $T;
+    }
+
+    return $T;
+}
+
+sub adaptive_ac_encode ($symbols) {
+
+    my $enc        = '';
+    my @alphabet   = sort { $a <=> $b } uniq(@$symbols);
+    my $EOF_SYMBOL = scalar(@alphabet) ? ($alphabet[-1] + 1) : 1;
+    push @alphabet, $EOF_SYMBOL;
+
+    my $alphabet_size = $#alphabet;
+    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet_size);
+
+    my %table;
+    @table{@alphabet} = (0 .. $alphabet_size);
+
+    if ($T > MAX) {
+        die "Too few bits: $T > ${\MAX}";
+    }
+
+    my $low      = 0;
+    my $high     = MAX;
+    my $uf_count = 0;
+
+    foreach my $value (@$symbols, $EOF_SYMBOL) {
+
+        my $c = $table{$value};
+        my $w = $high - $low + 1;
+
+        $high = ($low + int(($w * $cf->[$c + 1]) / $T) - 1) & MAX;
+        $low  = ($low + int(($w * $cf->[$c]) / $T)) & MAX;
+
+        $T = _increment_freq($c, $alphabet_size, $freq, $cf);
+
+        if ($high > MAX) {
+            die "high > MAX: $high > ${\MAX}";
+        }
+
+        if ($low >= $high) { die "$low >= $high" }
+
+        while (1) {
+
+            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
+
+                my $bit = $high >> (BITS - 1);
+                $enc .= $bit;
+
+                if ($uf_count > 0) {
+                    $enc .= join('', 1 - $bit) x $uf_count;
+                    $uf_count = 0;
+                }
+
+                $low <<= 1;
+                ($high <<= 1) |= 1;
+            }
+            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
+                ($high <<= 1) |= (1 << (BITS - 1));
+                $high |= 1;
+                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
+                ++$uf_count;
+            }
+            else {
+                last;
+            }
+
+            $low  &= MAX;
+            $high &= MAX;
+        }
+    }
+
+    $enc .= '0';
+    $enc .= '1';
+
+    while (length($enc) % 8 != 0) {
+        $enc .= '1';
+    }
+
+    return ($enc, \@alphabet);
+}
+
+sub adaptive_ac_decode ($fh, $alphabet) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $alphabet);
+    }
+
+    my @dec;
+    my $low  = 0;
+    my $high = MAX;
+
+    my $alphabet_size = $#{$alphabet};
+    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet_size);
+
+    my $enc = oct('0b' . join '', map { getc($fh) // 1 } 1 .. BITS);
+
+    while (1) {
+        my $w  = ($high + 1) - $low;
+        my $ss = int((($T * ($enc - $low + 1)) - 1) / $w);
+
+        my $i = 0;
+        foreach my $j (0 .. $alphabet_size) {
+            if ($cf->[$j] <= $ss and $ss < $cf->[$j + 1]) {
+                $i = $j;
+                last;
+            }
+        }
+
+        last if ($i == $alphabet_size);
+        push @dec, $alphabet->[$i];
+
+        $high = ($low + int(($w * $cf->[$i + 1]) / $T) - 1) & MAX;
+        $low  = ($low + int(($w * $cf->[$i]) / $T)) & MAX;
+
+        $T = _increment_freq($i, $alphabet_size, $freq, $cf);
+
+        if ($high > MAX) {
+            die "high > MAX: ($high > ${\MAX})";
+        }
+
+        if ($low >= $high) { die "$low >= $high" }
+
+        while (1) {
+
+            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
+                ($high <<= 1) |= 1;
+                $low <<= 1;
+                ($enc <<= 1) |= (getc($fh) // 1);
+            }
+            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
+                ($high <<= 1) |= (1 << (BITS - 1));
+                $high |= 1;
+                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
+                $enc = (($enc >> (BITS - 1)) << (BITS - 1)) | (($enc & ((1 << (BITS - 2)) - 1)) << 1) | (getc($fh) // 1);
+            }
+            else {
+                last;
+            }
+
+            $low  &= MAX;
+            $high &= MAX;
+            $enc  &= MAX;
+        }
+    }
+
+    return \@dec;
+}
+
+#####################
+# Generic run-length
+#####################
+
+sub run_length ($arr, $max_run = undef) {
+
+    @$arr || return [];
+
+    my @result     = [$arr->[0], 1];
+    my $prev_value = $arr->[0];
+
+    foreach my $i (1 .. $#$arr) {
+
+        my $curr_value = $arr->[$i];
+
+        if ($curr_value == $prev_value and (defined($max_run) ? $result[-1][1] < $max_run : 1)) {
+            ++$result[-1][1];
+        }
+        else {
+            push(@result, [$curr_value, 1]);
+        }
+
+        $prev_value = $curr_value;
+    }
+
+    return \@result;
+}
+
+######################################
+# Binary variable run-length encoding
+######################################
+
+sub binary_vrl_encode ($bitstring) {
+
+    my @bits    = split(//, $bitstring);
+    my $encoded = $bits[0];
+
+    foreach my $rle (@{run_length(\@bits)}) {
+        my ($c, $v) = @$rle;
+
+        if ($v == 1) {
+            $encoded .= '0';
+        }
+        else {
+            my $t = sprintf('%b', $v - 1);
+            $encoded .= join('', '1' x length($t), '0', substr($t, 1));
+        }
+    }
+
+    return $encoded;
+}
+
+sub binary_vrl_decode ($bitstring) {
+
+    my $decoded = '';
+    my $bit     = substr($bitstring, 0, 1, '');
+
+    while ($bitstring ne '') {
+
+        $decoded .= $bit;
+
+        my $bl = 0;
+        while (substr($bitstring, 0, 1, '') eq '1') {
+            ++$bl;
+        }
+
+        if ($bl > 0) {
+            $decoded .= $bit x oct('0b1' . join('', map { substr($bitstring, 0, 1, '') } 1 .. $bl - 1));
+        }
+
+        $bit = ($bit eq '1' ? '0' : '1');
+    }
+
+    return $decoded;
+}
+
+############################
+# Burrows-Wheeler transform
+############################
+
+sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
+#<<<
+    [
+     map { $_->[1] } sort {
+              ($a->[0] cmp $b->[0])
+           || ((substr($s, $a->[1]) . substr($s, 0, $a->[1])) cmp (substr($s, $b->[1]) . substr($s, 0, $b->[1])))
+     }
+     map {
+         my $t = substr($s, $_, $LOOKAHEAD_LEN);
+
+         if (length($t) < $LOOKAHEAD_LEN) {
+             $t .= substr($s, 0, ($_ < $LOOKAHEAD_LEN) ? $_ : ($LOOKAHEAD_LEN - length($t)));
+         }
+
+         [$t, $_]
+       } 0 .. length($s) - 1
+    ];
+#>>>
+}
+
+sub bwt_encode ($s, $LOOKAHEAD_LEN = 128) {
+
+    my $bwt = bwt_sort($s, $LOOKAHEAD_LEN);
+    my $ret = join('', map { substr($s, $_ - 1, 1) } @$bwt);
+
+    my $idx = 0;
+    foreach my $i (@$bwt) {
+        $i || last;
+        ++$idx;
+    }
+
+    return ($ret, $idx);
+}
+
+sub bwt_decode ($bwt, $idx) {    # fast inversion
+
+    my @tail = split(//, $bwt);
+    my @head = sort @tail;
+
+    my %indices;
+    foreach my $i (0 .. $#tail) {
+        push @{$indices{$tail[$i]}}, $i;
+    }
+
+    my @table;
+    foreach my $v (@head) {
+        push @table, shift(@{$indices{$v}});
+    }
+
+    my $dec = '';
+    my $i   = $idx;
+
+    for (1 .. scalar(@head)) {
+        $dec .= $head[$i];
+        $i = $table[$i];
+    }
+
+    return $dec;
+}
+
+##############################################
+# Burrows-Wheeler transform (symbolic variant)
+##############################################
+
+sub bwt_sort_symbolic ($s) {    # O(n) space (slowish)
+
+    my @cyclic = @$s;
+    my $len    = scalar(@cyclic);
+
+    my $rle = 1;
+    foreach my $i (1 .. $len - 1) {
+        if ($cyclic[$i] != $cyclic[$i - 1]) {
+            $rle = 0;
+            last;
+        }
+    }
+
+    $rle && return [0 .. $len - 1];
+
+    [
+     sort {
+         my ($i, $j) = ($a, $b);
+
+         while ($cyclic[$i] == $cyclic[$j]) {
+             $i %= $len if (++$i >= $len);
+             $j %= $len if (++$j >= $len);
+         }
+
+         $cyclic[$i] <=> $cyclic[$j];
+       } 0 .. $len - 1
+    ];
+}
+
+sub bwt_encode_symbolic ($s) {
+
+    my $bwt = bwt_sort_symbolic($s);
+    my @ret = map { $s->[$_ - 1] } @$bwt;
+
+    my $idx = 0;
+    foreach my $i (@$bwt) {
+        $i || last;
+        ++$idx;
+    }
+
+    return (\@ret, $idx);
+}
+
+sub bwt_decode_symbolic ($bwt, $idx) {    # fast inversion
+
+    my @tail = @$bwt;
+    my @head = sort { $a <=> $b } @tail;
+
+    my %indices;
+    foreach my $i (0 .. $#tail) {
+        push @{$indices{$tail[$i]}}, $i;
+    }
+
+    my @table;
+    foreach my $v (@head) {
+        push @table, shift(@{$indices{$v}});
+    }
+
+    my @dec;
+    my $i = $idx;
+
+    for (1 .. scalar(@head)) {
+        push @dec, $head[$i];
+        $i = $table[$i];
+    }
+
+    return \@dec;
+}
+
+#####################
+# RLE4 used in Bzip2
+#####################
+
+sub rle4_encode ($symbols, $max_run = 255) {    # RLE1
+
+    my $end = $#{$symbols};
+    return [] if ($end < 0);
+
+    my $prev = $symbols->[0];
+    my $run  = 1;
+    my @rle  = ($prev);
+
+    for (my $i = 1 ; $i <= $end ; ++$i) {
+
+        if ($symbols->[$i] == $prev) {
+            ++$run;
+        }
+        else {
+            $run  = 1;
+            $prev = $symbols->[$i];
+        }
+
+        push @rle, $prev;
+
+        if ($run >= 4) {
+
+            $run = 0;
+            $i += 1;
+
+            while ($run < $max_run and $i <= $end and $symbols->[$i] == $prev) {
+                ++$run;
+                ++$i;
+            }
+
+            push @rle, $run;
+            $run = 1;
+
+            if ($i <= $end) {
+                $prev = $symbols->[$i];
+                push @rle, $symbols->[$i];
+            }
+        }
+    }
+
+    return \@rle;
+}
+
+sub rle4_decode ($symbols) {    # RLE1
+
+    my $end = $#{$symbols};
+    return [] if ($end < 0);
+
+    my @dec  = $symbols->[0];
+    my $prev = $symbols->[0];
+    my $run  = 1;
+
+    for (my $i = 1 ; $i <= $end ; ++$i) {
+
+        if ($symbols->[$i] == $prev) {
+            ++$run;
+        }
+        else {
+            $run  = 1;
+            $prev = $symbols->[$i];
+        }
+
+        push @dec, $prev;
+
+        if ($run >= 4) {
+            if (++$i <= $end) {
+                $run = $symbols->[$i];
+                push @dec, (($prev) x $run);
+            }
+
+            $run = 0;
+        }
+    }
+
+    return \@dec;
+}
+
+#######################
+# Delta encoding (+RLE)
+#######################
 
 sub _compute_elias_costs ($run_length) {
 
@@ -475,72 +1265,683 @@ sub delta_decode ($fh) {
     return $decoded;
 }
 
-########################
-# Fibonacci Coding
-########################
+################################
+# Alphabet encoding (from Bzip2)
+################################
 
-sub fibonacci_encode ($symbols) {
+sub _encode_alphabet_256 ($alphabet) {
 
-    my $bitstring = '';
+    my %table;
+    @table{@$alphabet} = ();
 
-    foreach my $n (scalar(@$symbols), @$symbols) {
-        my ($f1, $f2, $f3) = (0, 1, 1);
-        my ($rn, $s, $k) = ($n + 1, '', 2);
-        for (; $f3 <= $rn ; ++$k) {
-            ($f1, $f2, $f3) = ($f2, $f3, $f2 + $f3);
-        }
-        foreach my $i (1 .. $k - 2) {
-            ($f3, $f2, $f1) = ($f2, $f1, $f2 - $f1);
-            if ($f3 <= $rn) {
-                $rn -= $f3;
-                $s .= '1';
-            }
-            else {
-                $s .= '0';
+    my $populated = 0;
+    my @marked;
+
+    for (my $i = 0 ; $i <= 255 ; $i += 32) {
+
+        my $enc = 0;
+        foreach my $j (0 .. 31) {
+            if (exists($table{$i + $j})) {
+                $enc |= 1 << $j;
             }
         }
-        $bitstring .= reverse($s) . '1';
+
+        $populated <<= 1;
+
+        if ($enc > 0) {
+            $populated |= 1;
+            push @marked, 0xffffffff - $enc;
+        }
     }
 
-    pack('B*', $bitstring);
+    my $delta = delta_encode(\@marked);
+
+    $VERBOSE && say STDERR "Populated : ", sprintf('%08b', $populated);
+    $VERBOSE && say STDERR "Marked    : @marked";
+    $VERBOSE && say STDERR "Delta len : ", length($delta);
+
+    my $encoded = '';
+    $encoded .= chr($populated);
+    $encoded .= $delta;
+    return $encoded;
 }
 
-sub fibonacci_decode ($fh) {
+sub _decode_alphabet_256 ($fh) {
+
+    my @populated = split(//, sprintf('%08b', ord(getc($fh))));
+    my @marked    = map { 0xffffffff - $_ } @{delta_decode($fh)};
+
+    my @alphabet;
+    for (my $i = 0 ; $i <= 255 ; $i += 32) {
+        if (shift(@populated)) {
+            my $m = shift(@marked);
+            foreach my $j (0 .. 31) {
+                if ($m & 1) {
+                    push @alphabet, $i + $j;
+                }
+                $m >>= 1;
+            }
+        }
+    }
+
+    return \@alphabet;
+}
+
+sub encode_alphabet ($alphabet) {
+
+    my $max_symbol = max(@$alphabet) // -1;
+
+    if ($max_symbol <= 255) {
+        return (chr(1) . _encode_alphabet_256($alphabet));
+    }
+
+    return (chr(0) . delta_encode($alphabet));
+}
+
+sub decode_alphabet ($fh) {
 
     if (ref($fh) eq '') {
         open my $fh2, '<:raw', \$fh;
         return __SUB__->($fh2);
     }
 
-    my @symbols;
+    if (ord(getc($fh) // die "error") == 1) {
+        return _decode_alphabet_256($fh);
+    }
 
-    my $enc      = '';
-    my $prev_bit = '0';
+    return delta_decode($fh);
+}
 
-    my $len    = 0;
-    my $buffer = '';
+##########################
+# Move to front transform
+##########################
 
-    for (my $k = 0 ; $k <= $len ;) {
-        my $bit = read_bit($fh, \$buffer);
+sub mtf_encode ($symbols, $alphabet = undef) {
 
-        if ($bit eq '1' and $prev_bit eq '1') {
-            my ($value, $f1, $f2) = (0, 1, 1);
-            foreach my $bit (split //, $enc) {
-                $value += $f2 if $bit;
-                ($f1, $f2) = ($f2, $f1 + $f2);
-            }
-            push @symbols, $value - 1;
-            $len      = pop @symbols if (++$k == 1);
-            $enc      = '';
-            $prev_bit = '0';
+    my (@C, @table);
+
+    my @alphabet;
+    my @alphabet_copy;
+    my $return_alphabet = 0;
+
+    if (defined($alphabet)) {
+        @alphabet = @$alphabet;
+    }
+    else {
+        @alphabet        = sort { $a <=> $b } uniq(@$symbols);
+        $return_alphabet = 1;
+        @alphabet_copy   = @alphabet;
+    }
+
+    @table[@alphabet] = (0 .. $#alphabet);
+
+    foreach my $c (@$symbols) {
+        push @C, (my $index = $table[$c]);
+        unshift(@alphabet, splice(@alphabet, $index, 1));
+        @table[@alphabet[0 .. $index]] = (0 .. $index);
+    }
+
+    $return_alphabet || return \@C;
+    return (\@C, \@alphabet_copy);
+}
+
+sub mtf_decode ($encoded, $alphabet) {
+
+    my @S;
+    my @alpha = @$alphabet;
+
+    foreach my $p (@$encoded) {
+        push @S, $alpha[$p];
+        unshift(@alpha, splice(@alpha, $p, 1));
+    }
+
+    return \@S;
+}
+
+###########################
+# Zero Run-length encoding
+###########################
+
+sub zrle_encode ($symbols) {    # RLE2
+
+    my @rle;
+    my $end = $#{$symbols};
+
+    for (my $i = 0 ; $i <= $end ; ++$i) {
+
+        my $run = 0;
+        while ($i <= $end and $symbols->[$i] == 0) {
+            ++$run;
+            ++$i;
         }
-        else {
-            $enc .= $bit;
-            $prev_bit = $bit;
+
+        if ($run >= 1) {
+            my $t = sprintf('%b', $run + 1);
+            push @rle, split(//, substr($t, 1));
+        }
+
+        if ($i <= $end) {
+            push @rle, $symbols->[$i] + 1;
         }
     }
 
-    return \@symbols;
+    return \@rle;
+}
+
+sub zrle_decode ($rle) {    # RLE2
+
+    my @dec;
+    my $end = $#{$rle};
+
+    for (my $i = 0 ; $i <= $end ; ++$i) {
+        my $k = $rle->[$i];
+
+        if ($k == 0 or $k == 1) {
+            my $run = 1;
+            while (($i <= $end) and ($k == 0 or $k == 1)) {
+                ($run <<= 1) |= $k;
+                $k = $rle->[++$i];
+            }
+            push @dec, (0) x ($run - 1);
+        }
+
+        if ($i <= $end) {
+            push @dec, $k - 1;
+        }
+    }
+
+    return \@dec;
+}
+
+############################################################
+# Bzip2-like compression (BWT + MTF + ZRLE + Huffman coding)
+############################################################
+
+sub bz2_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
+
+    my $rle1 = rle4_encode([unpack('C*', $chunk)]);
+    my ($bwt, $idx) = bwt_encode(pack('C*', @$rle1));
+
+    $VERBOSE && say STDERR "BWT index = $idx";
+
+    my ($mtf, $alphabet) = mtf_encode([unpack 'C*', $bwt]);
+    my $rle = zrle_encode($mtf);
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+
+    print $out_fh pack('N', $idx);
+    print $out_fh encode_alphabet($alphabet);
+    print $out_fh $entropy_sub->($rle);
+
+    return $out_str;
+}
+
+sub bz2_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $out_fh, $entropy_sub);
+    }
+
+    my $idx      = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
+    my $alphabet = decode_alphabet($fh);
+
+    $VERBOSE && say STDERR "BWT index = $idx";
+    $VERBOSE && say STDERR "Alphabet size: ", scalar(@$alphabet);
+
+    my $rle  = $entropy_sub->($fh);
+    my $mtf  = zrle_decode($rle);
+    my $bwt  = mtf_decode($mtf, $alphabet);
+    my $rle4 = bwt_decode(pack('C*', @$bwt), $idx);
+    my $data = rle4_decode([unpack('C*', $rle4)]);
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh pack('C*', @$data);
+    return $out_str // '';
+}
+
+###########################################
+# Bzip2-like compression (symbolic variant)
+###########################################
+
+sub bz2_compress_symbolic ($symbols, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
+
+    if (ref($symbols) eq '') {
+        return __SUB__->([unpack('C*', $symbols)], $out_fh, $entropy_sub);
+    }
+
+    my $rle4 = rle4_encode($symbols);
+    my ($bwt, $idx) = bwt_encode_symbolic($rle4);
+
+    my ($mtf, $alphabet) = mtf_encode($bwt);
+    my $rle = zrle_encode($mtf);
+
+    $VERBOSE && say STDERR "BWT index = $idx";
+    $VERBOSE && say STDERR "Max symbol: ", max(@$alphabet) // 0;
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+
+    print $out_fh pack('N', $idx);
+    print $out_fh encode_alphabet($alphabet);
+    print $out_fh $entropy_sub->($rle);
+
+    return $out_str;
+}
+
+sub bz2_decompress_symbolic ($fh, $entropy_sub = \&decode_huffman_entry) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $entropy_sub);
+    }
+
+    my $idx      = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
+    my $alphabet = decode_alphabet($fh);
+
+    $VERBOSE && say STDERR "BWT index = $idx";
+    $VERBOSE && say STDERR "Alphabet size: ", scalar(@$alphabet);
+
+    my $rle  = $entropy_sub->($fh);
+    my $mtf  = zrle_decode($rle);
+    my $bwt  = mtf_decode($mtf, $alphabet);
+    my $rle4 = bwt_decode_symbolic($bwt, $idx);
+    my $data = rle4_decode($rle4);
+
+    return $data;
+}
+
+###########################
+# Arithmetic Coding entries
+###########################
+
+sub create_ac_entry ($symbols, $out_fh = undef) {
+
+    my ($enc, $freq) = ac_encode($symbols);
+    my $max_symbol = max(keys %$freq) // 0;
+
+    my @freqs;
+    foreach my $k (0 .. $max_symbol) {
+        push @freqs, $freq->{$k} // 0;
+    }
+
+    push @freqs, length($enc) >> 3;
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh delta_encode(\@freqs);
+    print $out_fh pack("B*", $enc);
+    return $out_str;
+}
+
+sub decode_ac_entry ($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    my @freqs    = @{delta_decode($fh)};
+    my $bits_len = pop(@freqs);
+
+    my %freq;
+    foreach my $i (0 .. $#freqs) {
+        if ($freqs[$i]) {
+            $freq{$i} = $freqs[$i];
+        }
+    }
+
+    $VERBOSE && say STDERR "Encoded length: $bits_len";
+    my $bits = read_bits($fh, $bits_len << 3);
+
+    if ($bits_len > 0) {
+        open my $bits_fh, '<:raw', \$bits;
+        return ac_decode($bits_fh, \%freq);
+    }
+
+    return [];
+}
+
+####################################
+# Adaptive Arithmetic Coding entries
+####################################
+
+sub create_adaptive_ac_entry ($symbols, $out_fh = undef) {
+
+    my ($enc, $alphabet) = adaptive_ac_encode($symbols);
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh pack('N', length($enc));
+    print $out_fh encode_alphabet($alphabet);
+    print $out_fh pack("B*", $enc);
+    return $out_str;
+}
+
+sub decode_adaptive_ac_entry ($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    my $enc_len  = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
+    my $alphabet = decode_alphabet($fh);
+
+    if ($enc_len > 0) {
+        my $bits = read_bits($fh, $enc_len);
+        open my $bits_fh, '<:raw', \$bits;
+        return adaptive_ac_decode($bits_fh, $alphabet);
+    }
+
+    return [];
+}
+
+###########################
+# Huffman Coding algorithm
+###########################
+
+sub huffman_encode ($symbols, $dict) {
+    join('', @{$dict}{@$symbols});
+}
+
+sub huffman_decode ($bits, $rev_dict) {
+    local $" = '|';
+    [
+     split(
+         ' ', $bits =~ s{(@{[
+        map  { $_->[1] }
+        sort { $a->[0] <=> $b->[0] }
+        map  { [length($_), $_] }
+        keys %$rev_dict]
+    })}{$rev_dict->{$1} }gr
+          )
+    ];
+}
+
+# produce encode and decode dictionary from a tree
+sub _huffman_walk_tree ($node, $code, $h) {
+
+    my $c = $node->[0] // return $h;
+    if (ref $c) { __SUB__->($c->[$_], $code . $_, $h) for ('0', '1') }
+    else        { $h->{$c} = $code }
+
+    return $h;
+}
+
+sub huffman_from_code_lengths ($code_lengths) {
+
+    # This algorithm is based on the pseudocode in RFC 1951 (Section 3.2.2)
+    # (Steps are numbered as in the RFC)
+
+    # Step 1
+    my $max_length    = max(@$code_lengths) // 0;
+    my @length_counts = (0) x ($max_length + 1);
+    foreach my $length (@$code_lengths) {
+        ++$length_counts[$length];
+    }
+
+    # Step 2
+    my $code = 0;
+    $length_counts[0] = 0;
+    my @next_code = (0) x ($max_length + 1);
+    foreach my $bits (1 .. $max_length) {
+        $code = ($code + $length_counts[$bits - 1]) << 1;
+        $next_code[$bits] = $code;
+    }
+
+    # Step 3
+    my @code_table;
+    foreach my $n (0 .. $#{$code_lengths}) {
+        my $length = $code_lengths->[$n];
+        if ($length != 0) {
+            $code_table[$n] = sprintf('%0*b', $length, $next_code[$length]);
+            ++$next_code[$length];
+        }
+    }
+
+    my %dict;
+    my %rev_dict;
+
+    foreach my $i (0 .. $#{$code_lengths}) {
+        my $code = $code_table[$i];
+        if (defined($code)) {
+            $dict{$i}        = $code;
+            $rev_dict{$code} = $i;
+        }
+    }
+
+    return (wantarray ? (\%dict, \%rev_dict) : \%dict);
+}
+
+# make a tree, and return resulting dictionaries
+sub huffman_from_freq ($freq) {
+
+    my @nodes      = map { [$_, $freq->{$_}] } sort { $a <=> $b } keys %$freq;
+    my $max_symbol = scalar(@nodes) ? $nodes[-1][0] : -1;
+
+    do {    # poor man's priority queue
+        @nodes = sort { $a->[1] <=> $b->[1] } @nodes;
+        my ($x, $y) = splice(@nodes, 0, 2);
+        if (defined($x)) {
+            if (defined($y)) {
+                push @nodes, [[$x, $y], $x->[1] + $y->[1]];
+            }
+            else {
+                push @nodes, [[$x], $x->[1]];
+            }
+        }
+    } while (@nodes > 1);
+
+    my $h = _huffman_walk_tree($nodes[0], '', {});
+
+    my @code_lengths;
+    foreach my $i (0 .. $max_symbol) {
+        if (exists $h->{$i}) {
+            $code_lengths[$i] = length($h->{$i});
+        }
+        else {
+            $code_lengths[$i] = 0;
+        }
+    }
+
+    huffman_from_code_lengths(\@code_lengths);
+}
+
+sub huffman_from_symbols ($symbols) {
+    huffman_from_freq(frequencies($symbols));
+}
+
+########################
+# Huffman Coding entries
+########################
+
+sub create_huffman_entry ($symbols, $out_fh = undef) {
+
+    my $dict = huffman_from_symbols($symbols);
+    my $enc  = huffman_encode($symbols, $dict);
+
+    my $max_symbol = max(keys %$dict) // 0;
+    $VERBOSE && say STDERR "Max symbol: $max_symbol\n";
+
+    my @code_lengths;
+    foreach my $i (0 .. $max_symbol) {
+        if (exists($dict->{$i})) {
+            $code_lengths[$i] = length($dict->{$i});
+        }
+        else {
+            $code_lengths[$i] = 0;
+        }
+    }
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh delta_encode(\@code_lengths);
+    print $out_fh pack("N",  length($enc));
+    print $out_fh pack("B*", $enc);
+    return $out_str;
+}
+
+sub decode_huffman_entry ($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    my $code_lengths = delta_decode($fh);
+    my (undef, $rev_dict) = huffman_from_code_lengths($code_lengths);
+
+    my $enc_len = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
+    $VERBOSE && say STDERR "Encoded length: $enc_len\n";
+
+    if ($enc_len > 0) {
+        return huffman_decode(read_bits($fh, $enc_len), $rev_dict);
+    }
+
+    return [];
+}
+
+#########################################################################################
+# DEFLATE-like encoding of literals and backreferences produced by the LZ77/lZSS methods
+#########################################################################################
+
+sub make_deflate_tables ($size) {
+
+    # [distance value, offset bits]
+    my @DISTANCE_SYMBOLS = map { [$_, 0] } (0 .. 4);
+
+    until ($DISTANCE_SYMBOLS[-1][0] > $size) {
+        push @DISTANCE_SYMBOLS, [int($DISTANCE_SYMBOLS[-1][0] * (4 / 3)), $DISTANCE_SYMBOLS[-1][1] + 1];
+        push @DISTANCE_SYMBOLS, [int($DISTANCE_SYMBOLS[-1][0] * (3 / 2)), $DISTANCE_SYMBOLS[-1][1]];
+    }
+
+    # [length, offset bits]
+    my @LENGTH_SYMBOLS = ((map { [$_, 0] } (1 .. 10)));
+
+    {
+        my $delta = 1;
+        until ($LENGTH_SYMBOLS[-1][0] > 163) {
+            push @LENGTH_SYMBOLS, [$LENGTH_SYMBOLS[-1][0] + $delta, $LENGTH_SYMBOLS[-1][1] + 1];
+            $delta *= 2;
+            push @LENGTH_SYMBOLS, [$LENGTH_SYMBOLS[-1][0] + $delta, $LENGTH_SYMBOLS[-1][1]];
+            push @LENGTH_SYMBOLS, [$LENGTH_SYMBOLS[-1][0] + $delta, $LENGTH_SYMBOLS[-1][1]];
+            push @LENGTH_SYMBOLS, [$LENGTH_SYMBOLS[-1][0] + $delta, $LENGTH_SYMBOLS[-1][1]];
+        }
+        push @LENGTH_SYMBOLS, [258, 0];
+    }
+
+    my @LENGTH_INDICES;
+
+    foreach my $i (0 .. $#LENGTH_SYMBOLS) {
+        my ($min, $bits) = @{$LENGTH_SYMBOLS[$i]};
+        foreach my $k ($min .. $min + (1 << $bits) - 1) {
+            $LENGTH_INDICES[$k] = $i;
+        }
+    }
+
+    return (\@DISTANCE_SYMBOLS, \@LENGTH_SYMBOLS, \@LENGTH_INDICES);
+}
+
+sub find_deflate_index ($value, $table) {
+    foreach my $i (0 .. $#{$table}) {
+        if ($table->[$i][0] > $value) {
+            return $i - 1;
+        }
+    }
+    die "error";
+}
+
+sub deflate_encode ($literals, $distances, $lengths, $entropy_sub = \&create_huffman_entry) {
+
+    my $size = max(@$distances) // 0;
+    my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables($size);
+
+    my @len_symbols;
+    my @dist_symbols;
+    my $offset_bits = '';
+
+    foreach my $k (0 .. $#$literals) {
+
+        push @len_symbols, $literals->[$k];
+
+        my $len  = $lengths->[$k] || next;
+        my $dist = $distances->[$k];
+
+        {
+            my $len_idx = $LENGTH_INDICES->[$len];
+            my ($min, $bits) = @{$LENGTH_SYMBOLS->[$len_idx]};
+
+            push @len_symbols, $len_idx + 256;
+
+            if ($bits > 0) {
+                $offset_bits .= sprintf('%0*b', $bits, $len - $min);
+            }
+        }
+
+        {
+            my $dist_idx = find_deflate_index($dist, $DISTANCE_SYMBOLS);
+            my ($min, $bits) = @{$DISTANCE_SYMBOLS->[$dist_idx]};
+
+            push @dist_symbols, $dist_idx;
+
+            if ($bits > 0) {
+                $offset_bits .= sprintf('%0*b', $bits, $dist - $min);
+            }
+        }
+    }
+
+    open my $out_fh, '>:raw', \my $out_str;
+    print $out_fh pack('N', $size);
+    print $out_fh $entropy_sub->(\@len_symbols);
+    print $out_fh $entropy_sub->(\@dist_symbols);
+    print $out_fh pack('B*', $offset_bits);
+    return $out_str;
+}
+
+sub deflate_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $entropy_sub);
+    }
+
+    my $size = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
+    my ($DISTANCE_SYMBOLS,, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables($size);
+
+    my $len_symbols  = $entropy_sub->($fh);
+    my $dist_symbols = $entropy_sub->($fh);
+
+    my $bits_len = 0;
+
+    foreach my $i (@$dist_symbols) {
+        $bits_len += $DISTANCE_SYMBOLS->[$i][1];
+    }
+
+    foreach my $i (@$len_symbols) {
+        if ($i >= 256) {
+            $bits_len += $LENGTH_SYMBOLS->[$i - 256][1];
+        }
+    }
+
+    my $bits = read_bits($fh, $bits_len);
+
+    my @literals;
+    my @lengths;
+    my @distances;
+
+    my $j = 0;
+
+    foreach my $i (@$len_symbols) {
+        if ($i >= 256) {
+            my $dist = $dist_symbols->[$j++];
+            $lengths[-1]   = $LENGTH_SYMBOLS->[$i - 256][0] + oct('0b' . substr($bits, 0, $LENGTH_SYMBOLS->[$i - 256][1], ''));
+            $distances[-1] = $DISTANCE_SYMBOLS->[$dist][0] + oct('0b' . substr($bits, 0, $DISTANCE_SYMBOLS->[$dist][1], ''));
+        }
+        else {
+            push @literals,  $i;
+            push @lengths,   0;
+            push @distances, 0;
+        }
+    }
+
+    return (\@literals, \@distances, \@lengths);
 }
 
 #####################
@@ -641,1278 +2042,172 @@ sub elias_omega_decode ($fh) {
     return \@ints;
 }
 
-#######################################
-# Adaptive Binary Concatenation method
-#######################################
+##################
+# LZ77 compression
+##################
 
-sub abc_encode ($integers) {
+sub lz77_encode ($str) {
 
-    my @counts;
-    my $count           = 0;
-    my $bits_width      = 1;
-    my $bits_max_symbol = 1 << $bits_width;
-    my $processed_len   = 0;
+    my $la = 0;
 
-    foreach my $k (@$integers) {
-        while ($k >= $bits_max_symbol) {
+    my $prefix = '';
+    my @chars  = split(//, $str);
+    my $end    = $#chars;
 
-            if ($count > 0) {
-                push @counts, [$bits_width, $count];
-                $processed_len += $count;
-            }
+    my (@literals, @distances, @lengths);
 
-            $count = 0;
-            $bits_max_symbol *= 2;
-            $bits_width      += 1;
+    while ($la <= $end) {
+
+        my $n = 1;
+        my $p = length($prefix);
+        my $tmp;
+
+        my $token = $chars[$la];
+
+        while (    $n <= 255
+               and $la + $n <= $end
+               and ($tmp = rindex($prefix, $token, $p)) >= 0) {
+            $p = $tmp;
+            $token .= $chars[$la + $n];
+            ++$n;
         }
-        ++$count;
+
+        --$n;
+        push @distances, $la - $p;
+        push @lengths,   $n;
+        push @literals,  ord($chars[$la + $n]);
+        $la += $n + 1;
+        $prefix .= $token;
     }
 
-    push @counts, grep { $_->[1] > 0 } [$bits_width, scalar(@$integers) - $processed_len];
-
-    $VERBOSE && say STDERR "Bit sizes: ", join(' ', map { $_->[0] } @counts);
-    $VERBOSE && say STDERR "Lengths  : ", join(' ', map { $_->[1] } @counts);
-    $VERBOSE && say STDERR '';
-
-    my $compressed = fibonacci_encode([(map { $_->[0] } @counts), (map { $_->[1] } @counts)]);
-
-    my $bits = '';
-    my @ints = @$integers;
-
-    foreach my $pair (@counts) {
-        my ($blen, $len) = @$pair;
-        foreach my $symbol (splice(@ints, 0, $len)) {
-            $bits .= sprintf("%0*b", $blen, $symbol);
-        }
-    }
-
-    $compressed .= pack('B*', $bits);
-    return $compressed;
+    return (\@literals, \@distances, \@lengths);
 }
 
-sub abc_decode ($fh) {
+sub lz77_decode ($literals, $distances, $lengths) {
 
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2);
+    my $chunk  = '';
+    my $offset = 0;
+
+    foreach my $i (0 .. $#$literals) {
+        $chunk .= substr($chunk, $offset - $distances->[$i], $lengths->[$i]) . chr($literals->[$i]);
+        $offset += $lengths->[$i] + 1;
     }
 
-    my $ints = fibonacci_decode($fh);
-    my $half = scalar(@$ints) >> 1;
-
-    my @counts;
-    foreach my $i (0 .. ($half - 1)) {
-        push @counts, [$ints->[$i], $ints->[$half + $i]];
-    }
-
-    my $bits_len = 0;
-
-    foreach my $pair (@counts) {
-        my ($blen, $len) = @$pair;
-        $bits_len += $blen * $len;
-    }
-
-    my $bits = read_bits($fh, $bits_len);
-
-    my @integers;
-    foreach my $pair (@counts) {
-        my ($blen, $len) = @$pair;
-        foreach my $chunk (unpack(sprintf('(a%d)*', $blen), substr($bits, 0, $blen * $len, ''))) {
-            push @integers, oct('0b' . $chunk);
-        }
-    }
-
-    return \@integers;
+    return $chunk;
 }
 
-###########################
-# Huffman Coding algorithm
-###########################
-
-sub huffman_from_code_lengths ($code_lengths) {
-
-    # This algorithm is based on the pseudocode in RFC 1951 (Section 3.2.2)
-    # (Steps are numbered as in the RFC)
-
-    # Step 1
-    my $max_length    = max(@$code_lengths) // 0;
-    my @length_counts = (0) x ($max_length + 1);
-    foreach my $length (@$code_lengths) {
-        ++$length_counts[$length];
-    }
-
-    # Step 2
-    my $code = 0;
-    $length_counts[0] = 0;
-    my @next_code = (0) x ($max_length + 1);
-    foreach my $bits (1 .. $max_length) {
-        $code = ($code + $length_counts[$bits - 1]) << 1;
-        $next_code[$bits] = $code;
-    }
-
-    # Step 3
-    my @code_table;
-    foreach my $n (0 .. $#{$code_lengths}) {
-        my $length = $code_lengths->[$n];
-        if ($length != 0) {
-            $code_table[$n] = sprintf('%0*b', $length, $next_code[$length]);
-            ++$next_code[$length];
-        }
-    }
-
-    my %dict;
-    my %rev_dict;
-
-    foreach my $i (0 .. $#{$code_lengths}) {
-        my $code = $code_table[$i];
-        if (defined($code)) {
-            $dict{$i}        = $code;
-            $rev_dict{$code} = $i;
-        }
-    }
-
-    return (wantarray ? (\%dict, \%rev_dict) : \%dict);
-}
-
-# produce encode and decode dictionary from a tree
-sub _huffman_walk_tree ($node, $code, $h) {
-
-    my $c = $node->[0] // return $h;
-    if (ref $c) { __SUB__->($c->[$_], $code . $_, $h) for ('0', '1') }
-    else        { $h->{$c} = $code }
-
-    return $h;
-}
-
-# make a tree, and return resulting dictionaries
-sub huffman_from_freq ($freq) {
-
-    my @nodes      = map { [$_, $freq->{$_}] } sort { $a <=> $b } keys %$freq;
-    my $max_symbol = scalar(@nodes) ? $nodes[-1][0] : -1;
-
-    do {    # poor man's priority queue
-        @nodes = sort { $a->[1] <=> $b->[1] } @nodes;
-        my ($x, $y) = splice(@nodes, 0, 2);
-        if (defined($x)) {
-            if (defined($y)) {
-                push @nodes, [[$x, $y], $x->[1] + $y->[1]];
-            }
-            else {
-                push @nodes, [[$x], $x->[1]];
-            }
-        }
-    } while (@nodes > 1);
-
-    my $h = _huffman_walk_tree($nodes[0], '', {});
-
-    my @code_lengths;
-    foreach my $i (0 .. $max_symbol) {
-        if (exists $h->{$i}) {
-            $code_lengths[$i] = length($h->{$i});
-        }
-        else {
-            $code_lengths[$i] = 0;
-        }
-    }
-
-    huffman_from_code_lengths(\@code_lengths);
-}
-
-sub huffman_from_symbols ($symbols) {
-    huffman_from_freq(frequencies($symbols));
-}
-
-sub huffman_encode ($symbols, $dict) {
-    join('', @{$dict}{@$symbols});
-}
-
-sub huffman_decode ($bits, $rev_dict) {
-    local $" = '|';
-    [
-     split(
-         ' ', $bits =~ s{(@{[
-        map  { $_->[1] }
-        sort { $a->[0] <=> $b->[0] }
-        map  { [length($_), $_] }
-        keys %$rev_dict]
-    })}{$rev_dict->{$1} }gr
-          )
-    ];
-}
-
-sub create_huffman_entry ($symbols, $out_fh = undef) {
-
-    my $dict = huffman_from_symbols($symbols);
-    my $enc  = huffman_encode($symbols, $dict);
-
-    my $max_symbol = max(keys %$dict) // 0;
-    $VERBOSE && say STDERR "Max symbol: $max_symbol\n";
-
-    my @code_lengths;
-    foreach my $i (0 .. $max_symbol) {
-        if (exists($dict->{$i})) {
-            $code_lengths[$i] = length($dict->{$i});
-        }
-        else {
-            $code_lengths[$i] = 0;
-        }
-    }
-
+sub lz77_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
+    my ($literals, $distances, $lengths) = lz77_encode($chunk);
+    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$distances)));
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh delta_encode(\@code_lengths);
-    print $out_fh pack("N",  length($enc));
-    print $out_fh pack("B*", $enc);
+    print $out_fh deflate_encode($literals, $distances, $lengths, $entropy_sub);
     return $out_str;
 }
 
-sub decode_huffman_entry ($fh) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2);
-    }
-
-    my $code_lengths = delta_decode($fh);
-    my (undef, $rev_dict) = huffman_from_code_lengths($code_lengths);
-
-    my $enc_len = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
-    $VERBOSE && say STDERR "Encoded length: $enc_len\n";
-
-    if ($enc_len > 0) {
-        return huffman_decode(read_bits($fh, $enc_len), $rev_dict);
-    }
-
-    return [];
-}
-
-###################################
-# Arithmetic Coding (in fixed bits)
-###################################
-
-sub _create_cfreq ($freq) {
-
-    my @cf;
-    my $T = 0;
-
-    foreach my $i (sort { $a <=> $b } keys %$freq) {
-        $freq->{$i} // next;
-        $cf[$i] = $T;
-        $T += $freq->{$i};
-        $cf[$i + 1] = $T;
-    }
-
-    return (\@cf, $T);
-}
-
-sub ac_encode ($symbols) {
-
-    my $enc        = '';
-    my $EOF_SYMBOL = (max(@$symbols) // 0) + 1;
-    my @bytes      = (@$symbols, $EOF_SYMBOL);
-
-    my $freq = frequencies(\@bytes);
-    my ($cf, $T) = _create_cfreq($freq);
-
-    if ($T > MAX) {
-        die "Too few bits: $T > ${\MAX}";
-    }
-
-    my $low      = 0;
-    my $high     = MAX;
-    my $uf_count = 0;
-
-    foreach my $c (@bytes) {
-
-        my $w = $high - $low + 1;
-
-        $high = ($low + int(($w * $cf->[$c + 1]) / $T) - 1) & MAX;
-        $low  = ($low + int(($w * $cf->[$c]) / $T)) & MAX;
-
-        if ($high > MAX) {
-            die "high > MAX: $high > ${\MAX}";
-        }
-
-        if ($low >= $high) { die "$low >= $high" }
-
-        while (1) {
-
-            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
-
-                my $bit = $high >> (BITS - 1);
-                $enc .= $bit;
-
-                if ($uf_count > 0) {
-                    $enc .= join('', 1 - $bit) x $uf_count;
-                    $uf_count = 0;
-                }
-
-                $low <<= 1;
-                ($high <<= 1) |= 1;
-            }
-            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
-                ($high <<= 1) |= (1 << (BITS - 1));
-                $high |= 1;
-                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
-                ++$uf_count;
-            }
-            else {
-                last;
-            }
-
-            $low  &= MAX;
-            $high &= MAX;
-        }
-    }
-
-    $enc .= '0';
-    $enc .= '1';
-
-    while (length($enc) % 8 != 0) {
-        $enc .= '1';
-    }
-
-    return ($enc, $freq);
-}
-
-sub ac_decode ($fh, $freq) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $freq);
-    }
-
-    my ($cf, $T) = _create_cfreq($freq);
-
-    my @dec;
-    my $low  = 0;
-    my $high = MAX;
-    my $enc  = oct('0b' . join '', map { getc($fh) // 1 } 1 .. BITS);
-
-    my @table;
-    foreach my $i (sort { $a <=> $b } keys %$freq) {
-        foreach my $j ($cf->[$i] .. $cf->[$i + 1] - 1) {
-            $table[$j] = $i;
-        }
-    }
-
-    my $EOF_SYMBOL = max(keys %$freq) // 0;
-
-    while (1) {
-
-        my $w  = $high - $low + 1;
-        my $ss = int((($T * ($enc - $low + 1)) - 1) / $w);
-
-        my $i = $table[$ss] // last;
-        last if ($i == $EOF_SYMBOL);
-
-        push @dec, $i;
-
-        $high = ($low + int(($w * $cf->[$i + 1]) / $T) - 1) & MAX;
-        $low  = ($low + int(($w * $cf->[$i]) / $T)) & MAX;
-
-        if ($high > MAX) {
-            die "error";
-        }
-
-        if ($low >= $high) { die "$low >= $high" }
-
-        while (1) {
-
-            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
-                ($high <<= 1) |= 1;
-                $low <<= 1;
-                ($enc <<= 1) |= (getc($fh) // 1);
-            }
-            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
-                ($high <<= 1) |= (1 << (BITS - 1));
-                $high |= 1;
-                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
-                $enc = (($enc >> (BITS - 1)) << (BITS - 1)) | (($enc & ((1 << (BITS - 2)) - 1)) << 1) | (getc($fh) // 1);
-            }
-            else {
-                last;
-            }
-
-            $low  &= MAX;
-            $high &= MAX;
-            $enc  &= MAX;
-        }
-    }
-
-    return \@dec;
-}
-
-sub create_ac_entry ($symbols, $out_fh = undef) {
-
-    my ($enc, $freq) = ac_encode($symbols);
-    my $max_symbol = max(keys %$freq) // 0;
-
-    my @freqs;
-    foreach my $k (0 .. $max_symbol) {
-        push @freqs, $freq->{$k} // 0;
-    }
-
-    push @freqs, length($enc) >> 3;
-
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh delta_encode(\@freqs);
-    print $out_fh pack("B*", $enc);
-    return $out_str;
-}
-
-sub decode_ac_entry ($fh) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2);
-    }
-
-    my @freqs    = @{delta_decode($fh)};
-    my $bits_len = pop(@freqs);
-
-    my %freq;
-    foreach my $i (0 .. $#freqs) {
-        if ($freqs[$i]) {
-            $freq{$i} = $freqs[$i];
-        }
-    }
-
-    $VERBOSE && say STDERR "Encoded length: $bits_len";
-    my $bits = read_bits($fh, $bits_len << 3);
-
-    if ($bits_len > 0) {
-        open my $bits_fh, '<:raw', \$bits;
-        return ac_decode($bits_fh, \%freq);
-    }
-
-    return [];
-}
-
-#############################################
-# Adaptive Arithemtic Coding (in fixed bits)
-#############################################
-
-sub _create_adaptive_cfreq ($freq_value, $alphabet_size) {
-
-    my $T = 0;
-    my (@cf, @freq);
-
-    foreach my $i (0 .. $alphabet_size) {
-        $freq[$i] = $freq_value;
-        $cf[$i]   = $T;
-        $T += $freq_value;
-        $cf[$i + 1] = $T;
-    }
-
-    return (\@freq, \@cf, $T);
-}
-
-sub _increment_freq ($c, $alphabet_size, $freq, $cf) {
-
-    ++$freq->[$c];
-    my $T = $cf->[$c];
-
-    foreach my $i ($c .. $alphabet_size) {
-        $cf->[$i] = $T;
-        $T += $freq->[$i];
-        $cf->[$i + 1] = $T;
-    }
-
-    return $T;
-}
-
-sub adaptive_ac_encode ($symbols) {
-
-    my $enc        = '';
-    my @alphabet   = sort { $a <=> $b } uniq(@$symbols);
-    my $EOF_SYMBOL = scalar(@alphabet) ? ($alphabet[-1] + 1) : 1;
-    push @alphabet, $EOF_SYMBOL;
-
-    my $alphabet_size = $#alphabet;
-    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet_size);
-
-    my %table;
-    @table{@alphabet} = (0 .. $alphabet_size);
-
-    if ($T > MAX) {
-        die "Too few bits: $T > ${\MAX}";
-    }
-
-    my $low      = 0;
-    my $high     = MAX;
-    my $uf_count = 0;
-
-    foreach my $value (@$symbols, $EOF_SYMBOL) {
-
-        my $c = $table{$value};
-        my $w = $high - $low + 1;
-
-        $high = ($low + int(($w * $cf->[$c + 1]) / $T) - 1) & MAX;
-        $low  = ($low + int(($w * $cf->[$c]) / $T)) & MAX;
-
-        $T = _increment_freq($c, $alphabet_size, $freq, $cf);
-
-        if ($high > MAX) {
-            die "high > MAX: $high > ${\MAX}";
-        }
-
-        if ($low >= $high) { die "$low >= $high" }
-
-        while (1) {
-
-            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
-
-                my $bit = $high >> (BITS - 1);
-                $enc .= $bit;
-
-                if ($uf_count > 0) {
-                    $enc .= join('', 1 - $bit) x $uf_count;
-                    $uf_count = 0;
-                }
-
-                $low <<= 1;
-                ($high <<= 1) |= 1;
-            }
-            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
-                ($high <<= 1) |= (1 << (BITS - 1));
-                $high |= 1;
-                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
-                ++$uf_count;
-            }
-            else {
-                last;
-            }
-
-            $low  &= MAX;
-            $high &= MAX;
-        }
-    }
-
-    $enc .= '0';
-    $enc .= '1';
-
-    while (length($enc) % 8 != 0) {
-        $enc .= '1';
-    }
-
-    return ($enc, \@alphabet);
-}
-
-sub adaptive_ac_decode ($fh, $alphabet) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $alphabet);
-    }
-
-    my @dec;
-    my $low  = 0;
-    my $high = MAX;
-
-    my $alphabet_size = $#{$alphabet};
-    my ($freq, $cf, $T) = _create_adaptive_cfreq(INITIAL_FREQ, $alphabet_size);
-
-    my $enc = oct('0b' . join '', map { getc($fh) // 1 } 1 .. BITS);
-
-    while (1) {
-        my $w  = ($high + 1) - $low;
-        my $ss = int((($T * ($enc - $low + 1)) - 1) / $w);
-
-        my $i = 0;
-        foreach my $j (0 .. $alphabet_size) {
-            if ($cf->[$j] <= $ss and $ss < $cf->[$j + 1]) {
-                $i = $j;
-                last;
-            }
-        }
-
-        last if ($i == $alphabet_size);
-        push @dec, $alphabet->[$i];
-
-        $high = ($low + int(($w * $cf->[$i + 1]) / $T) - 1) & MAX;
-        $low  = ($low + int(($w * $cf->[$i]) / $T)) & MAX;
-
-        $T = _increment_freq($i, $alphabet_size, $freq, $cf);
-
-        if ($high > MAX) {
-            die "high > MAX: ($high > ${\MAX})";
-        }
-
-        if ($low >= $high) { die "$low >= $high" }
-
-        while (1) {
-
-            if (($high >> (BITS - 1)) == ($low >> (BITS - 1))) {
-                ($high <<= 1) |= 1;
-                $low <<= 1;
-                ($enc <<= 1) |= (getc($fh) // 1);
-            }
-            elsif (((($low >> (BITS - 2)) & 0x1) == 1) && ((($high >> (BITS - 2)) & 0x1) == 0)) {
-                ($high <<= 1) |= (1 << (BITS - 1));
-                $high |= 1;
-                ($low <<= 1) &= ((1 << (BITS - 1)) - 1);
-                $enc = (($enc >> (BITS - 1)) << (BITS - 1)) | (($enc & ((1 << (BITS - 2)) - 1)) << 1) | (getc($fh) // 1);
-            }
-            else {
-                last;
-            }
-
-            $low  &= MAX;
-            $high &= MAX;
-            $enc  &= MAX;
-        }
-    }
-
-    return \@dec;
-}
-
-sub create_adaptive_ac_entry ($symbols, $out_fh = undef) {
-
-    my ($enc, $alphabet) = adaptive_ac_encode($symbols);
-
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh pack('N', length($enc));
-    print $out_fh encode_alphabet($alphabet);
-    print $out_fh pack("B*", $enc);
-    return $out_str;
-}
-
-sub decode_adaptive_ac_entry ($fh) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2);
-    }
-
-    my $enc_len  = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
-    my $alphabet = decode_alphabet($fh);
-
-    if ($enc_len > 0) {
-        my $bits = read_bits($fh, $enc_len);
-        open my $bits_fh, '<:raw', \$bits;
-        return adaptive_ac_decode($bits_fh, $alphabet);
-    }
-
-    return [];
-}
-
-##########################
-# Move to front transform
-##########################
-
-sub mtf_encode ($symbols, $alphabet = undef) {
-
-    my (@C, @table);
-
-    my @alphabet;
-    my @alphabet_copy;
-    my $return_alphabet = 0;
-
-    if (defined($alphabet)) {
-        @alphabet = @$alphabet;
-    }
-    else {
-        @alphabet        = sort { $a <=> $b } uniq(@$symbols);
-        $return_alphabet = 1;
-        @alphabet_copy   = @alphabet;
-    }
-
-    @table[@alphabet] = (0 .. $#alphabet);
-
-    foreach my $c (@$symbols) {
-        push @C, (my $index = $table[$c]);
-        unshift(@alphabet, splice(@alphabet, $index, 1));
-        @table[@alphabet[0 .. $index]] = (0 .. $index);
-    }
-
-    $return_alphabet || return \@C;
-    return (\@C, \@alphabet_copy);
-}
-
-sub mtf_decode ($encoded, $alphabet) {
-
-    my @S;
-    my @alpha = @$alphabet;
-
-    foreach my $p (@$encoded) {
-        push @S, $alpha[$p];
-        unshift(@alpha, splice(@alpha, $p, 1));
-    }
-
-    return \@S;
-}
-
-############################
-# Burrows-Wheeler transform
-############################
-
-sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
-#<<<
-    [
-     map { $_->[1] } sort {
-              ($a->[0] cmp $b->[0])
-           || ((substr($s, $a->[1]) . substr($s, 0, $a->[1])) cmp (substr($s, $b->[1]) . substr($s, 0, $b->[1])))
-     }
-     map {
-         my $t = substr($s, $_, $LOOKAHEAD_LEN);
-
-         if (length($t) < $LOOKAHEAD_LEN) {
-             $t .= substr($s, 0, ($_ < $LOOKAHEAD_LEN) ? $_ : ($LOOKAHEAD_LEN - length($t)));
-         }
-
-         [$t, $_]
-       } 0 .. length($s) - 1
-    ];
-#>>>
-}
-
-sub bwt_encode ($s, $LOOKAHEAD_LEN = 128) {
-
-    my $bwt = bwt_sort($s, $LOOKAHEAD_LEN);
-    my $ret = join('', map { substr($s, $_ - 1, 1) } @$bwt);
-
-    my $idx = 0;
-    foreach my $i (@$bwt) {
-        $i || last;
-        ++$idx;
-    }
-
-    return ($ret, $idx);
-}
-
-sub bwt_decode ($bwt, $idx) {    # fast inversion
-
-    my @tail = split(//, $bwt);
-    my @head = sort @tail;
-
-    my %indices;
-    foreach my $i (0 .. $#tail) {
-        push @{$indices{$tail[$i]}}, $i;
-    }
-
-    my @table;
-    foreach my $v (@head) {
-        push @table, shift(@{$indices{$v}});
-    }
-
-    my $dec = '';
-    my $i   = $idx;
-
-    for (1 .. scalar(@head)) {
-        $dec .= $head[$i];
-        $i = $table[$i];
-    }
-
-    return $dec;
-}
-
-#####################
-# Generic run-length
-#####################
-
-sub run_length ($arr, $max_run = undef) {
-
-    @$arr || return [];
-
-    my @result     = [$arr->[0], 1];
-    my $prev_value = $arr->[0];
-
-    foreach my $i (1 .. $#$arr) {
-
-        my $curr_value = $arr->[$i];
-
-        if ($curr_value == $prev_value and (defined($max_run) ? $result[-1][1] < $max_run : 1)) {
-            ++$result[-1][1];
-        }
-        else {
-            push(@result, [$curr_value, 1]);
-        }
-
-        $prev_value = $curr_value;
-    }
-
-    return \@result;
-}
-
-######################################
-# Binary variable run-length encoding
-######################################
-
-sub binary_vrl_encode ($bitstring) {
-
-    my @bits    = split(//, $bitstring);
-    my $encoded = $bits[0];
-
-    foreach my $rle (@{run_length(\@bits)}) {
-        my ($c, $v) = @$rle;
-
-        if ($v == 1) {
-            $encoded .= '0';
-        }
-        else {
-            my $t = sprintf('%b', $v - 1);
-            $encoded .= join('', '1' x length($t), '0', substr($t, 1));
-        }
-    }
-
-    return $encoded;
-}
-
-sub binary_vrl_decode ($bitstring) {
-
-    my $decoded = '';
-    my $bit     = substr($bitstring, 0, 1, '');
-
-    while ($bitstring ne '') {
-
-        $decoded .= $bit;
-
-        my $bl = 0;
-        while (substr($bitstring, 0, 1, '') eq '1') {
-            ++$bl;
-        }
-
-        if ($bl > 0) {
-            $decoded .= $bit x oct('0b1' . join('', map { substr($bitstring, 0, 1, '') } 1 .. $bl - 1));
-        }
-
-        $bit = ($bit eq '1' ? '0' : '1');
-    }
-
-    return $decoded;
-}
-
-#####################
-# RLE4 used in Bzip2
-#####################
-
-sub rle4_encode ($symbols, $max_run = 255) {    # RLE1
-
-    my $end = $#{$symbols};
-    return [] if ($end < 0);
-
-    my $prev = $symbols->[0];
-    my $run  = 1;
-    my @rle  = ($prev);
-
-    for (my $i = 1 ; $i <= $end ; ++$i) {
-
-        if ($symbols->[$i] == $prev) {
-            ++$run;
-        }
-        else {
-            $run  = 1;
-            $prev = $symbols->[$i];
-        }
-
-        push @rle, $prev;
-
-        if ($run >= 4) {
-
-            $run = 0;
-            $i += 1;
-
-            while ($run < $max_run and $i <= $end and $symbols->[$i] == $prev) {
-                ++$run;
-                ++$i;
-            }
-
-            push @rle, $run;
-            $run = 1;
-
-            if ($i <= $end) {
-                $prev = $symbols->[$i];
-                push @rle, $symbols->[$i];
-            }
-        }
-    }
-
-    return \@rle;
-}
-
-sub rle4_decode ($symbols) {    # RLE1
-
-    my $end = $#{$symbols};
-    return [] if ($end < 0);
-
-    my @dec  = $symbols->[0];
-    my $prev = $symbols->[0];
-    my $run  = 1;
-
-    for (my $i = 1 ; $i <= $end ; ++$i) {
-
-        if ($symbols->[$i] == $prev) {
-            ++$run;
-        }
-        else {
-            $run  = 1;
-            $prev = $symbols->[$i];
-        }
-
-        push @dec, $prev;
-
-        if ($run >= 4) {
-            if (++$i <= $end) {
-                $run = $symbols->[$i];
-                push @dec, (($prev) x $run);
-            }
-
-            $run = 0;
-        }
-    }
-
-    return \@dec;
-}
-
-###########################
-# Zero Run-length encoding
-###########################
-
-sub zrle_encode ($symbols) {    # RLE2
-
-    my @rle;
-    my $end = $#{$symbols};
-
-    for (my $i = 0 ; $i <= $end ; ++$i) {
-
-        my $run = 0;
-        while ($i <= $end and $symbols->[$i] == 0) {
-            ++$run;
-            ++$i;
-        }
-
-        if ($run >= 1) {
-            my $t = sprintf('%b', $run + 1);
-            push @rle, split(//, substr($t, 1));
-        }
-
-        if ($i <= $end) {
-            push @rle, $symbols->[$i] + 1;
-        }
-    }
-
-    return \@rle;
-}
-
-sub zrle_decode ($rle) {    # RLE2
-
-    my @dec;
-    my $end = $#{$rle};
-
-    for (my $i = 0 ; $i <= $end ; ++$i) {
-        my $k = $rle->[$i];
-
-        if ($k == 0 or $k == 1) {
-            my $run = 1;
-            while (($i <= $end) and ($k == 0 or $k == 1)) {
-                ($run <<= 1) |= $k;
-                $k = $rle->[++$i];
-            }
-            push @dec, (0) x ($run - 1);
-        }
-
-        if ($i <= $end) {
-            push @dec, $k - 1;
-        }
-    }
-
-    return \@dec;
-}
-
-sub _encode_alphabet_256 ($alphabet) {
-
-    my %table;
-    @table{@$alphabet} = ();
-
-    my $populated = 0;
-    my @marked;
-
-    for (my $i = 0 ; $i <= 255 ; $i += 32) {
-
-        my $enc = 0;
-        foreach my $j (0 .. 31) {
-            if (exists($table{$i + $j})) {
-                $enc |= 1 << $j;
-            }
-        }
-
-        $populated <<= 1;
-
-        if ($enc > 0) {
-            $populated |= 1;
-            push @marked, 0xffffffff - $enc;
-        }
-    }
-
-    my $delta = delta_encode(\@marked);
-
-    $VERBOSE && say STDERR "Populated : ", sprintf('%08b', $populated);
-    $VERBOSE && say STDERR "Marked    : @marked";
-    $VERBOSE && say STDERR "Delta len : ", length($delta);
-
-    my $encoded = '';
-    $encoded .= chr($populated);
-    $encoded .= $delta;
-    return $encoded;
-}
-
-sub _decode_alphabet_256 ($fh) {
-
-    my @populated = split(//, sprintf('%08b', ord(getc($fh))));
-    my @marked    = map { 0xffffffff - $_ } @{delta_decode($fh)};
-
-    my @alphabet;
-    for (my $i = 0 ; $i <= 255 ; $i += 32) {
-        if (shift(@populated)) {
-            my $m = shift(@marked);
-            foreach my $j (0 .. 31) {
-                if ($m & 1) {
-                    push @alphabet, $i + $j;
-                }
-                $m >>= 1;
-            }
-        }
-    }
-
-    return \@alphabet;
-}
-
-sub bwt_sort_symbolic ($s) {    # O(n) space (slowish)
-
-    my @cyclic = @$s;
-    my $len    = scalar(@cyclic);
-
-    my $rle = 1;
-    foreach my $i (1 .. $len - 1) {
-        if ($cyclic[$i] != $cyclic[$i - 1]) {
-            $rle = 0;
-            last;
-        }
-    }
-
-    $rle && return [0 .. $len - 1];
-
-    [
-     sort {
-         my ($i, $j) = ($a, $b);
-
-         while ($cyclic[$i] == $cyclic[$j]) {
-             $i %= $len if (++$i >= $len);
-             $j %= $len if (++$j >= $len);
-         }
-
-         $cyclic[$i] <=> $cyclic[$j];
-       } 0 .. $len - 1
-    ];
-}
-
-sub bwt_encode_symbolic ($s) {
-
-    my $bwt = bwt_sort_symbolic($s);
-    my @ret = map { $s->[$_ - 1] } @$bwt;
-
-    my $idx = 0;
-    foreach my $i (@$bwt) {
-        $i || last;
-        ++$idx;
-    }
-
-    return (\@ret, $idx);
-}
-
-sub bwt_decode_symbolic ($bwt, $idx) {    # fast inversion
-
-    my @tail = @$bwt;
-    my @head = sort { $a <=> $b } @tail;
-
-    my %indices;
-    foreach my $i (0 .. $#tail) {
-        push @{$indices{$tail[$i]}}, $i;
-    }
-
-    my @table;
-    foreach my $v (@head) {
-        push @table, shift(@{$indices{$v}});
-    }
-
-    my @dec;
-    my $i = $idx;
-
-    for (1 .. scalar(@head)) {
-        push @dec, $head[$i];
-        $i = $table[$i];
-    }
-
-    return \@dec;
-}
-
-sub encode_alphabet ($alphabet) {
-
-    my $max_symbol = max(@$alphabet) // -1;
-
-    if ($max_symbol <= 255) {
-        return (chr(1) . _encode_alphabet_256($alphabet));
-    }
-
-    return (chr(0) . delta_encode($alphabet));
-}
-
-sub decode_alphabet ($fh) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2);
-    }
-
-    if (ord(getc($fh) // die "error") == 1) {
-        return _decode_alphabet_256($fh);
-    }
-
-    return delta_decode($fh);
-}
-
-############################################################
-# Bzip2-like compression (BWT + MTF + ZRLE + Huffman coding)
-############################################################
-
-sub bz2_compress_symbolic ($symbols, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
-
-    if (ref($symbols) eq '') {
-        return __SUB__->([unpack('C*', $symbols)], $out_fh, $entropy_sub);
-    }
-
-    my $rle4 = rle4_encode($symbols);
-    my ($bwt, $idx) = bwt_encode_symbolic($rle4);
-
-    my ($mtf, $alphabet) = mtf_encode($bwt);
-    my $rle = zrle_encode($mtf);
-
-    $VERBOSE && say STDERR "BWT index = $idx";
-    $VERBOSE && say STDERR "Max symbol: ", max(@$alphabet) // 0;
-
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
-
-    print $out_fh pack('N', $idx);
-    print $out_fh encode_alphabet($alphabet);
-    print $out_fh $entropy_sub->($rle);
-
-    return $out_str;
-}
-
-sub bz2_decompress_symbolic ($fh, $entropy_sub = \&decode_huffman_entry) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $entropy_sub);
-    }
-
-    my $idx      = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
-    my $alphabet = decode_alphabet($fh);
-
-    $VERBOSE && say STDERR "BWT index = $idx";
-    $VERBOSE && say STDERR "Alphabet size: ", scalar(@$alphabet);
-
-    my $rle  = $entropy_sub->($fh);
-    my $mtf  = zrle_decode($rle);
-    my $bwt  = mtf_decode($mtf, $alphabet);
-    my $rle4 = bwt_decode_symbolic($bwt, $idx);
-    my $data = rle4_decode($rle4);
-
-    return $data;
-}
-
-sub bz2_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
-
-    my $rle1 = rle4_encode([unpack('C*', $chunk)]);
-    my ($bwt, $idx) = bwt_encode(pack('C*', @$rle1));
-
-    $VERBOSE && say STDERR "BWT index = $idx";
-
-    my ($mtf, $alphabet) = mtf_encode([unpack 'C*', $bwt]);
-    my $rle = zrle_encode($mtf);
-
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
-
-    print $out_fh pack('N', $idx);
-    print $out_fh encode_alphabet($alphabet);
-    print $out_fh $entropy_sub->($rle);
-
-    return $out_str;
-}
-
-sub bz2_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry) {
+sub lz77_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry) {
 
     if (ref($fh) eq '') {
         open my $fh2, '<:raw', \$fh;
         return __SUB__->($fh2, $out_fh, $entropy_sub);
     }
 
-    my $idx      = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
-    my $alphabet = decode_alphabet($fh);
-
-    $VERBOSE && say STDERR "BWT index = $idx";
-    $VERBOSE && say STDERR "Alphabet size: ", scalar(@$alphabet);
-
-    my $rle  = $entropy_sub->($fh);
-    my $mtf  = zrle_decode($rle);
-    my $bwt  = mtf_decode($mtf, $alphabet);
-    my $rle4 = bwt_decode(pack('C*', @$bwt), $idx);
-    my $data = rle4_decode([unpack('C*', $rle4)]);
-
+    my ($literals, $distances, $lengths) = deflate_decode($fh, $entropy_sub);
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh pack('C*', @$data);
+    print $out_fh lz77_decode($literals, $distances, $lengths);
     return $out_str // '';
 }
 
-##########################
-# LZ77 / LZSS Compression
-##########################
+################################################################
+# Encode a list of symbols, using offset bits and huffman coding
+################################################################
 
-sub find_deflate_index ($value, $table) {
-    foreach my $i (0 .. $#{$table}) {
-        if ($table->[$i][0] > $value) {
-            return $i - 1;
+sub obh_encode ($distances, $entropy_sub = \&create_huffman_entry) {
+
+    my $size = max(@$distances) // 0;
+    my ($DISTANCE_SYMBOLS) = make_deflate_tables($size);
+
+    my @symbols;
+    my $offset_bits = '';
+
+    foreach my $dist (@$distances) {
+
+        my $i = find_deflate_index($dist, $DISTANCE_SYMBOLS);
+        my ($min, $bits) = @{$DISTANCE_SYMBOLS->[$i]};
+
+        push @symbols, $i;
+
+        if ($bits > 0) {
+            $offset_bits .= sprintf('%0*b', $bits, $dist - $min);
         }
     }
-    die "error";
+
+    open my $out_fh, '>:raw', \my $out_str;
+    print $out_fh pack('N', $size);
+    print $out_fh $entropy_sub->(\@symbols);
+    print $out_fh pack('B*', $offset_bits);
+    return $out_str;
 }
 
-sub make_deflate_tables ($size) {
+sub obh_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
 
-    # [distance value, offset bits]
-    my @DISTANCE_SYMBOLS = map { [$_, 0] } (0 .. 4);
-
-    until ($DISTANCE_SYMBOLS[-1][0] > $size) {
-        push @DISTANCE_SYMBOLS, [int($DISTANCE_SYMBOLS[-1][0] * (4 / 3)), $DISTANCE_SYMBOLS[-1][1] + 1];
-        push @DISTANCE_SYMBOLS, [int($DISTANCE_SYMBOLS[-1][0] * (3 / 2)), $DISTANCE_SYMBOLS[-1][1]];
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $entropy_sub);
     }
 
-    # [length, offset bits]
-    my @LENGTH_SYMBOLS = ((map { [$_, 0] } (1 .. 10)));
+    my $size = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
+    my ($DISTANCE_SYMBOLS) = make_deflate_tables($size);
 
-    {
-        my $delta = 1;
-        until ($LENGTH_SYMBOLS[-1][0] > 163) {
-            push @LENGTH_SYMBOLS, [$LENGTH_SYMBOLS[-1][0] + $delta, $LENGTH_SYMBOLS[-1][1] + 1];
-            $delta *= 2;
-            push @LENGTH_SYMBOLS, [$LENGTH_SYMBOLS[-1][0] + $delta, $LENGTH_SYMBOLS[-1][1]];
-            push @LENGTH_SYMBOLS, [$LENGTH_SYMBOLS[-1][0] + $delta, $LENGTH_SYMBOLS[-1][1]];
-            push @LENGTH_SYMBOLS, [$LENGTH_SYMBOLS[-1][0] + $delta, $LENGTH_SYMBOLS[-1][1]];
-        }
-        push @LENGTH_SYMBOLS, [258, 0];
+    my $symbols  = $entropy_sub->($fh);
+    my $bits_len = 0;
+
+    foreach my $i (@$symbols) {
+        $bits_len += $DISTANCE_SYMBOLS->[$i][1];
     }
 
-    my @LENGTH_INDICES;
+    my $bits = read_bits($fh, $bits_len);
 
-    foreach my $i (0 .. $#LENGTH_SYMBOLS) {
-        my ($min, $bits) = @{$LENGTH_SYMBOLS[$i]};
-        foreach my $k ($min .. $min + (1 << $bits) - 1) {
-            $LENGTH_INDICES[$k] = $i;
-        }
+    my @distances;
+    foreach my $i (@$symbols) {
+        push @distances, $DISTANCE_SYMBOLS->[$i][0] + oct('0b' . substr($bits, 0, $DISTANCE_SYMBOLS->[$i][1], ''));
     }
 
-    return (\@DISTANCE_SYMBOLS, \@LENGTH_SYMBOLS, \@LENGTH_INDICES);
+    return \@distances;
 }
+
+##################
+# LZHD compression
+##################
+
+sub lzhd_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
+    my ($literals, $distances, $lengths) = lz77_encode($chunk);
+    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (4 * scalar(@$literals)));
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh $entropy_sub->($literals);
+    print $out_fh $entropy_sub->($lengths);
+    print $out_fh obh_encode($distances, $entropy_sub);
+    return $out_str;
+}
+
+sub lzhd_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $out_fh, $entropy_sub);
+    }
+
+    my $literals  = $entropy_sub->($fh);
+    my $lengths   = $entropy_sub->($fh);
+    my $distances = obh_decode($fh, $entropy_sub);
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh lz77_decode($literals, $distances, $lengths);
+    return $out_str // '';
+}
+
+###################
+# LZSS Compression
+###################
 
 sub lzss_encode ($str) {
 
@@ -1971,57 +2266,21 @@ sub lzss_encode ($str) {
     return (\@literals, \@distances, \@lengths);
 }
 
-sub lz77_encode ($str) {
-
-    my $la = 0;
-
-    my $prefix = '';
-    my @chars  = split(//, $str);
-    my $end    = $#chars;
-
-    my (@literals, @distances, @lengths);
-
-    while ($la <= $end) {
-
-        my $n = 1;
-        my $p = length($prefix);
-        my $tmp;
-
-        my $token = $chars[$la];
-
-        while (    $n <= 255
-               and $la + $n <= $end
-               and ($tmp = rindex($prefix, $token, $p)) >= 0) {
-            $p = $tmp;
-            $token .= $chars[$la + $n];
-            ++$n;
-        }
-
-        --$n;
-        push @distances, $la - $p;
-        push @lengths,   $n;
-        push @literals,  ord($chars[$la + $n]);
-        $la += $n + 1;
-        $prefix .= $token;
-    }
-
-    return (\@literals, \@distances, \@lengths);
-}
-
-sub lz77_decode ($literals, $distances, $lengths) {
-
-    my $chunk  = '';
-    my $offset = 0;
-
-    foreach my $i (0 .. $#$literals) {
-        $chunk .= substr($chunk, $offset - $distances->[$i], $lengths->[$i]) . chr($literals->[$i]);
-        $offset += $lengths->[$i] + 1;
-    }
-
-    return $chunk;
-}
-
 *lzss_decode = \&lz77_decode;
+
+sub lzss_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
+    my ($literals, $distances, $lengths) = lzss_encode($chunk);
+    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$distances)));
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh deflate_encode($literals, $distances, $lengths, $entropy_sub);
+    return $out_str;
+}
+
+*lzss_decompress = \&lz77_decompress;
+
+#################
+# LZW Compression
+#################
 
 sub lzw_encode ($uncompressed) {
 
@@ -2086,225 +2345,6 @@ sub lzw_decode ($compressed) {
     }
 
     return $result;
-}
-
-#########################################################################################
-# DEFLATE-like encoding of literals and backreferences produced by the LZ77/lZSS methods
-#########################################################################################
-
-sub deflate_encode ($literals, $distances, $lengths, $entropy_sub = \&create_huffman_entry) {
-
-    my $size = max(@$distances) // 0;
-    my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables($size);
-
-    my @len_symbols;
-    my @dist_symbols;
-    my $offset_bits = '';
-
-    foreach my $k (0 .. $#$literals) {
-
-        push @len_symbols, $literals->[$k];
-
-        my $len  = $lengths->[$k] || next;
-        my $dist = $distances->[$k];
-
-        {
-            my $len_idx = $LENGTH_INDICES->[$len];
-            my ($min, $bits) = @{$LENGTH_SYMBOLS->[$len_idx]};
-
-            push @len_symbols, $len_idx + 256;
-
-            if ($bits > 0) {
-                $offset_bits .= sprintf('%0*b', $bits, $len - $min);
-            }
-        }
-
-        {
-            my $dist_idx = find_deflate_index($dist, $DISTANCE_SYMBOLS);
-            my ($min, $bits) = @{$DISTANCE_SYMBOLS->[$dist_idx]};
-
-            push @dist_symbols, $dist_idx;
-
-            if ($bits > 0) {
-                $offset_bits .= sprintf('%0*b', $bits, $dist - $min);
-            }
-        }
-    }
-
-    open my $out_fh, '>:raw', \my $out_str;
-    print $out_fh pack('N', $size);
-    print $out_fh $entropy_sub->(\@len_symbols);
-    print $out_fh $entropy_sub->(\@dist_symbols);
-    print $out_fh pack('B*', $offset_bits);
-    return $out_str;
-}
-
-sub deflate_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $entropy_sub);
-    }
-
-    my $size = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
-    my ($DISTANCE_SYMBOLS,, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables($size);
-
-    my $len_symbols  = $entropy_sub->($fh);
-    my $dist_symbols = $entropy_sub->($fh);
-
-    my $bits_len = 0;
-
-    foreach my $i (@$dist_symbols) {
-        $bits_len += $DISTANCE_SYMBOLS->[$i][1];
-    }
-
-    foreach my $i (@$len_symbols) {
-        if ($i >= 256) {
-            $bits_len += $LENGTH_SYMBOLS->[$i - 256][1];
-        }
-    }
-
-    my $bits = read_bits($fh, $bits_len);
-
-    my @literals;
-    my @lengths;
-    my @distances;
-
-    my $j = 0;
-
-    foreach my $i (@$len_symbols) {
-        if ($i >= 256) {
-            my $dist = $dist_symbols->[$j++];
-            $lengths[-1]   = $LENGTH_SYMBOLS->[$i - 256][0] + oct('0b' . substr($bits, 0, $LENGTH_SYMBOLS->[$i - 256][1], ''));
-            $distances[-1] = $DISTANCE_SYMBOLS->[$dist][0] + oct('0b' . substr($bits, 0, $DISTANCE_SYMBOLS->[$dist][1], ''));
-        }
-        else {
-            push @literals,  $i;
-            push @lengths,   0;
-            push @distances, 0;
-        }
-    }
-
-    return (\@literals, \@distances, \@lengths);
-}
-
-################################################################
-# Encode a list of symbols, using offset bits and huffman coding
-#################################################################
-
-sub obh_encode ($distances, $entropy_sub = \&create_huffman_entry) {
-
-    my $size = max(@$distances) // 0;
-    my ($DISTANCE_SYMBOLS) = make_deflate_tables($size);
-
-    my @symbols;
-    my $offset_bits = '';
-
-    foreach my $dist (@$distances) {
-
-        my $i = find_deflate_index($dist, $DISTANCE_SYMBOLS);
-        my ($min, $bits) = @{$DISTANCE_SYMBOLS->[$i]};
-
-        push @symbols, $i;
-
-        if ($bits > 0) {
-            $offset_bits .= sprintf('%0*b', $bits, $dist - $min);
-        }
-    }
-
-    open my $out_fh, '>:raw', \my $out_str;
-    print $out_fh pack('N', $size);
-    print $out_fh $entropy_sub->(\@symbols);
-    print $out_fh pack('B*', $offset_bits);
-    return $out_str;
-}
-
-sub obh_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $entropy_sub);
-    }
-
-    my $size = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
-    my ($DISTANCE_SYMBOLS) = make_deflate_tables($size);
-
-    my $symbols  = $entropy_sub->($fh);
-    my $bits_len = 0;
-
-    foreach my $i (@$symbols) {
-        $bits_len += $DISTANCE_SYMBOLS->[$i][1];
-    }
-
-    my $bits = read_bits($fh, $bits_len);
-
-    my @distances;
-    foreach my $i (@$symbols) {
-        push @distances, $DISTANCE_SYMBOLS->[$i][0] + oct('0b' . substr($bits, 0, $DISTANCE_SYMBOLS->[$i][1], ''));
-    }
-
-    return \@distances;
-}
-
-###################
-# LZSS Compression
-###################
-
-sub lzss_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
-    my ($literals, $distances, $lengths) = lzss_encode($chunk);
-    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$distances)));
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh deflate_encode($literals, $distances, $lengths, $entropy_sub);
-    return $out_str;
-}
-
-sub lz77_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
-    my ($literals, $distances, $lengths) = lz77_encode($chunk);
-    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (scalar(@$literals) + scalar(@$lengths) + 2 * scalar(@$distances)));
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh deflate_encode($literals, $distances, $lengths, $entropy_sub);
-    return $out_str;
-}
-
-sub lz77_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $out_fh, $entropy_sub);
-    }
-
-    my ($literals, $distances, $lengths) = deflate_decode($fh, $entropy_sub);
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh lz77_decode($literals, $distances, $lengths);
-    return $out_str // '';
-}
-
-*lzss_decompress = \&lz77_decompress;
-
-sub lzhd_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
-    my ($literals, $distances, $lengths) = lz77_encode($chunk);
-    $VERBOSE && say STDERR (scalar(@$literals), ' -> ', length($chunk) / (4 * scalar(@$literals)));
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh $entropy_sub->($literals);
-    print $out_fh $entropy_sub->($lengths);
-    print $out_fh obh_encode($distances, $entropy_sub);
-    return $out_str;
-}
-
-sub lzhd_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $out_fh, $entropy_sub);
-    }
-
-    my $literals  = $entropy_sub->($fh);
-    my $lengths   = $entropy_sub->($fh);
-    my $distances = obh_decode($fh, $entropy_sub);
-
-    $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh lz77_decode($literals, $distances, $lengths);
-    return $out_str // '';
 }
 
 sub lzw_compress ($chunk, $out_fh = undef, $enc_method = \&abc_encode) {
