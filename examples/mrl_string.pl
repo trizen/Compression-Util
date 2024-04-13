@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# LZW compressor/decompressor + Elias Omega coding, for compressing a given string.
+# MRL compressor/decompressor, for compressing a given string.
 
 use 5.036;
 use lib               qw(../lib);
@@ -18,8 +18,8 @@ foreach my $file (__FILE__, $^X) {
         <$fh>;
     };
 
-    my $enc = lzw_compress($str, undef, \&elias_omega_encode);
-    my $dec = lzw_decompress($enc, undef, \&elias_omega_decode);
+    my $enc = mrl_compress($str);
+    my $dec = pack('C*', @{mrl_decompress($enc)});
 
     say "Original size  : ", length($str);
     say "Compressed size: ", length($enc);

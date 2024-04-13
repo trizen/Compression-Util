@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 130;
+plan tests => 145;
 
 ##################################
 
@@ -30,6 +30,9 @@ sub test_array ($arr) {
     is_deeply(obh_decode(obh_encode($arr, \&create_ac_entry),          \&decode_ac_entry),          $arr);
     is_deeply(obh_decode(obh_encode($arr, \&create_adaptive_ac_entry), \&decode_adaptive_ac_entry), $arr);
 
+    is_deeply(mrl_decompress(mrl_compress($arr)),                                                                $arr);
+    is_deeply(mrl_decompress(mrl_compress($arr, undef, \&create_adaptive_ac_entry), \&decode_adaptive_ac_entry), $arr);
+
     is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic($arr)), $arr);
     is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic($arr, undef, \&create_ac_entry),          \&decode_ac_entry),          $arr);
     is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic($arr, undef, \&create_adaptive_ac_entry), \&decode_adaptive_ac_entry), $arr);
@@ -52,6 +55,12 @@ is(lzss_decompress(lzss_compress('')), '');
 is(lzhd_decompress(lzhd_compress('')), '');
 is(lzw_decompress(lzw_compress('')),   '');
 
+is_deeply(mrl_decompress(mrl_compress([])),         []);
+is_deeply(mrl_decompress(mrl_compress([0])),        [0]);
+is_deeply(mrl_decompress(mrl_compress('a')),        [ord('a')]);
+is_deeply(mrl_decompress(mrl_compress([ord('a')])), [ord('a')]);
+
+is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic('a')), [ord('a')]);
 is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic([1])), [1]);
 is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic([0])), [0]);
 is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic([])),  []);
@@ -76,6 +85,9 @@ is_deeply(bz2_decompress_symbolic(bz2_compress_symbolic([])),  []);
     is_deeply(decode_huffman_entry(create_huffman_entry(\@symbols)),         \@symbols);
     is_deeply(decode_ac_entry(create_ac_entry(\@symbols)),                   \@symbols);
     is_deeply(decode_adaptive_ac_entry(create_adaptive_ac_entry(\@symbols)), \@symbols);
+
+    is_deeply(mrl_decompress(mrl_compress(\@symbols)),                                              \@symbols);
+    is_deeply(mrl_decompress(mrl_compress(\@symbols, undef, \&create_ac_entry), \&decode_ac_entry), \@symbols);
 
     is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols))), pack('C*', @symbols));
     is_deeply(lzw_decompress(lzw_compress(pack('C*', @symbols), undef, \&delta_encode),             undef, \&delta_decode),             pack('C*', @symbols));

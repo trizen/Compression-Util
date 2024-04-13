@@ -48,6 +48,9 @@ our %EXPORT_TAGS = (
           bz2_compress_symbolic
           bz2_decompress_symbolic
 
+          mrl_compress
+          mrl_decompress
+
           create_huffman_entry
           decode_huffman_entry
 
@@ -1358,6 +1361,14 @@ sub decode_alphabet ($fh) {
 
 sub mtf_encode ($symbols, $alphabet = undef) {
 
+    if (ref($symbols) eq '') {
+        return __SUB__->([unpack('C*', $symbols)], $alphabet);
+    }
+
+    if (defined($alphabet) and ref($alphabet) eq '') {
+        return __SUB__->($symbols, [unpack('C*', $alphabet)]);
+    }
+
     my (@C, @table);
 
     my @alphabet;
@@ -1386,6 +1397,14 @@ sub mtf_encode ($symbols, $alphabet = undef) {
 }
 
 sub mtf_decode ($encoded, $alphabet) {
+
+    if (ref($encoded) eq '') {
+        return __SUB__->([unpack('C*', $encoded)], $alphabet);
+    }
+
+    if (ref($alphabet) eq '') {
+        return __SUB__->($encoded, [unpack('C*', $alphabet)]);
+    }
 
     my @S;
     my @alpha = @$alphabet;
@@ -1451,6 +1470,45 @@ sub zrle_decode ($rle) {    # RLE2
     }
 
     return \@dec;
+}
+
+################################################################
+# Move-to-front compression (MTF + RLE4 + ZRLE + Huffman coding)
+################################################################
+
+sub mrl_compress ($symbols, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
+
+    if (ref($symbols) eq '') {
+        return __SUB__->([unpack('C*', $symbols)], $out_fh, $entropy_sub);
+    }
+
+    my ($mtf, $alphabet) = mtf_encode($symbols);
+    my $rle  = zrle_encode($mtf);
+    my $rle4 = rle4_encode($rle, scalar(@$rle));
+
+    $out_fh // open $out_fh, '>:raw', \my $out_str;
+    print $out_fh encode_alphabet($alphabet);
+    print $out_fh $entropy_sub->($rle4);
+    return $out_str;
+}
+
+sub mrl_decompress ($fh, $entropy_sub = \&decode_huffman_entry) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $entropy_sub);
+    }
+
+    my $alphabet = decode_alphabet($fh);
+
+    $VERBOSE && say STDERR "Alphabet size: ", scalar(@$alphabet);
+
+    my $rle4    = $entropy_sub->($fh);
+    my $rle     = rle4_decode($rle4);
+    my $mtf     = zrle_decode($rle);
+    my $symbols = mtf_decode($mtf, $alphabet);
+
+    return $symbols;
 }
 
 ############################################################
@@ -2487,6 +2545,9 @@ The encoding of input and output file-handles must be set to C<:raw>.
       create_adaptive_ac_entry(\@symbols)  # Create an Adaptive Arithmetic Coding block
       decode_adaptive_ac_entry($fh)        # Decode an Adaptive Arithmetic Coding block
 
+      mrl_compress(\@symbols)              # MRL compression (MTF+ZRLE+RLE4+Huffman coding)
+      mrl_decompress($fh)                  # Inverse of the above method
+
       bz2_compress($string)                # Bzip2-like compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
       bz2_decompress($fh)                  # Inverse of the above method
 
@@ -2822,7 +2883,7 @@ Inverse of C<bz2_compress()>.
     bz2_compress_symbolic(\@symbols, $out_fh, \&create_ac_entry);             # writes to file-handle
     my $string = bz2_compress_symbolic(\@symbols, undef, \&create_ac_entry);  # returns a binary string
 
-Similar to C<bz2_compress()>, except that it accepts an arbitrary array-ref of non-negative integer symbols as input. It is also a bit slower on large inputs.
+Similar to C<bz2_compress()>, except that it accepts an arbitrary array-ref of non-negative integer values as input. It is also a bit slower on large inputs.
 
 =head2 bz2_decompress_symbolic
 
@@ -2835,6 +2896,37 @@ Similar to C<bz2_compress()>, except that it accepts an arbitrary array-ref of n
     my $symbols = bz2_decompress_symbolic($string, \&decode_ac_entry);
 
 Inverse of C<bz2_compress_symbolic()>.
+
+=head2 mrl_compress
+
+    # Does Huffman coding
+    mrl_compress(\@symbols, $out_fh);      # writes to file-handle
+    my $string = mrl_compress(\@symbols);  # returns a binary string
+
+    # Does Arithmetic coding
+    mrl_compress(\@symbols, $out_fh, \&create_ac_entry);             # writes to file-handle
+    my $string = mrl_compress(\@symbols, undef, \&create_ac_entry);  # returns a binary string
+
+A fast compression method, using the following pipeline:
+
+    1. mtf_encode
+    2. zrle_encode
+    3. rle4_encode
+    4. create_huffman_entry
+
+It accepts an arbitrary array-ref of non-negative integer values as input.
+
+=head2 mrl_decompress
+
+    # Using Huffman coding
+    my $symbols = mrl_decompress($fh);
+    my $symbols = mrl_decompress($string);
+
+    # Using Arithmetic coding
+    my $symbols = mrl_decompress($fh, \&decode_ac_entry);
+    my $symbols = mrl_decompress($string, \&decode_ac_entry);
+
+Inverse of C<mrl_compress()>.
 
 =head1 INTERFACE FOR MEDIUM-LEVEL FUNCTIONS
 

@@ -4,6 +4,7 @@ Revision history for Compression-Util
 
         [ADDITIONS]
 
+        - Added the mrl_compress() and mrl_decompress() functions.
         - Added the read_bit_lsb(), read_bits_lsb(), int2bits(), int2bits_lsb(), bits2int() and bits2int_lsb() functions.
         - Added the read_null_terminated() function.
 
