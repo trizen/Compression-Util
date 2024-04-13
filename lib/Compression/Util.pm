@@ -31,6 +31,9 @@ our %EXPORT_TAGS = (
           bits2int
           bits2int_lsb
 
+          string2symbols
+          symbols2string
+
           read_null_terminated
 
           bwt_encode
@@ -215,6 +218,14 @@ sub bits2int ($fh, $size, $buffer) {
 
 sub bits2int_lsb ($fh, $size, $buffer) {
     oct('0b' . reverse(join('', map { read_bit_lsb($fh, $buffer) } 1 .. $size)));
+}
+
+sub string2symbols ($string) {
+    [unpack('C*', $string)];
+}
+
+sub symbols2string ($symbols) {
+    pack('C*', @$symbols);
 }
 
 sub read_null_terminated ($fh) {
@@ -935,12 +946,11 @@ sub bwt_encode_symbolic ($s) {
 
 sub bwt_decode_symbolic ($bwt, $idx) {    # fast inversion
 
-    my @tail = @$bwt;
-    my @head = sort { $a <=> $b } @tail;
+    my @head = sort { $a <=> $b } @$bwt;
 
     my %indices;
-    foreach my $i (0 .. $#tail) {
-        push @{$indices{$tail[$i]}}, $i;
+    foreach my $i (0 .. $#head) {
+        push @{$indices{$bwt->[$i]}}, $i;
     }
 
     my @table;
@@ -1362,11 +1372,11 @@ sub decode_alphabet ($fh) {
 sub mtf_encode ($symbols, $alphabet = undef) {
 
     if (ref($symbols) eq '') {
-        return __SUB__->([unpack('C*', $symbols)], $alphabet);
+        return __SUB__->(string2symbols($symbols), $alphabet);
     }
 
     if (defined($alphabet) and ref($alphabet) eq '') {
-        return __SUB__->($symbols, [unpack('C*', $alphabet)]);
+        return __SUB__->($symbols, string2symbols($alphabet));
     }
 
     my (@C, @table);
@@ -1399,11 +1409,11 @@ sub mtf_encode ($symbols, $alphabet = undef) {
 sub mtf_decode ($encoded, $alphabet) {
 
     if (ref($encoded) eq '') {
-        return __SUB__->([unpack('C*', $encoded)], $alphabet);
+        return __SUB__->(string2symbols($encoded), $alphabet);
     }
 
     if (ref($alphabet) eq '') {
-        return __SUB__->($encoded, [unpack('C*', $alphabet)]);
+        return __SUB__->($encoded, string2symbols($alphabet));
     }
 
     my @S;
@@ -1479,7 +1489,7 @@ sub zrle_decode ($rle) {    # RLE2
 sub mrl_compress ($symbols, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
 
     if (ref($symbols) eq '') {
-        return __SUB__->([unpack('C*', $symbols)], $out_fh, $entropy_sub);
+        return __SUB__->(string2symbols($symbols), $out_fh, $entropy_sub);
     }
 
     my ($mtf, $alphabet) = mtf_encode($symbols);
@@ -1517,12 +1527,12 @@ sub mrl_decompress ($fh, $entropy_sub = \&decode_huffman_entry) {
 
 sub bz2_compress ($chunk, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
 
-    my $rle1 = rle4_encode([unpack('C*', $chunk)]);
-    my ($bwt, $idx) = bwt_encode(pack('C*', @$rle1));
+    my $rle1 = rle4_encode(string2symbols($chunk));
+    my ($bwt, $idx) = bwt_encode(symbols2string($rle1));
 
     $VERBOSE && say STDERR "BWT index = $idx";
 
-    my ($mtf, $alphabet) = mtf_encode([unpack 'C*', $bwt]);
+    my ($mtf, $alphabet) = mtf_encode(string2symbols($bwt));
     my $rle = zrle_encode($mtf);
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
@@ -1541,7 +1551,7 @@ sub bz2_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry)
         return __SUB__->($fh2, $out_fh, $entropy_sub);
     }
 
-    my $idx      = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
+    my $idx      = bits2int($fh, 32, \my $buffer);
     my $alphabet = decode_alphabet($fh);
 
     $VERBOSE && say STDERR "BWT index = $idx";
@@ -1550,11 +1560,11 @@ sub bz2_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry)
     my $rle  = $entropy_sub->($fh);
     my $mtf  = zrle_decode($rle);
     my $bwt  = mtf_decode($mtf, $alphabet);
-    my $rle4 = bwt_decode(pack('C*', @$bwt), $idx);
-    my $data = rle4_decode([unpack('C*', $rle4)]);
+    my $rle4 = bwt_decode(symbols2string($bwt), $idx);
+    my $data = rle4_decode(string2symbols($rle4));
 
     $out_fh // open $out_fh, '>:raw', \my $out_str;
-    print $out_fh pack('C*', @$data);
+    print $out_fh symbols2string($data);
     return $out_str // '';
 }
 
@@ -1565,7 +1575,7 @@ sub bz2_decompress ($fh, $out_fh = undef, $entropy_sub = \&decode_huffman_entry)
 sub bz2_compress_symbolic ($symbols, $out_fh = undef, $entropy_sub = \&create_huffman_entry) {
 
     if (ref($symbols) eq '') {
-        return __SUB__->([unpack('C*', $symbols)], $out_fh, $entropy_sub);
+        return __SUB__->(string2symbols($symbols), $out_fh, $entropy_sub);
     }
 
     my $rle4 = rle4_encode($symbols);
@@ -1593,7 +1603,7 @@ sub bz2_decompress_symbolic ($fh, $entropy_sub = \&decode_huffman_entry) {
         return __SUB__->($fh2, $entropy_sub);
     }
 
-    my $idx      = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
+    my $idx      = bits2int($fh, 32, \my $buffer);
     my $alphabet = decode_alphabet($fh);
 
     $VERBOSE && say STDERR "BWT index = $idx";
@@ -1680,7 +1690,7 @@ sub decode_adaptive_ac_entry ($fh) {
         return __SUB__->($fh2);
     }
 
-    my $enc_len  = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
+    my $enc_len  = bits2int($fh, 32, \my $buffer);
     my $alphabet = decode_alphabet($fh);
 
     if ($enc_len > 0) {
@@ -1846,7 +1856,7 @@ sub decode_huffman_entry ($fh) {
     my $code_lengths = delta_decode($fh);
     my (undef, $rev_dict) = huffman_from_code_lengths($code_lengths);
 
-    my $enc_len = unpack('N', join('', map { getc($fh) // die "error" } 1 .. 4));
+    my $enc_len = bits2int($fh, 32, \my $buffer);
     $VERBOSE && say STDERR "Encoded length: $enc_len\n";
 
     if ($enc_len > 0) {
@@ -1960,7 +1970,7 @@ sub deflate_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
         return __SUB__->($fh2, $entropy_sub);
     }
 
-    my $size = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
+    my $size = bits2int($fh, 32, \my $buffer);
     my ($DISTANCE_SYMBOLS,, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables($size);
 
     my $len_symbols  = $entropy_sub->($fh);
@@ -2213,7 +2223,7 @@ sub obh_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
         return __SUB__->($fh2, $entropy_sub);
     }
 
-    my $size = unpack('N', join('', map { getc($fh) // return undef } 1 .. 4));
+    my $size = bits2int($fh, 32, \my $buffer);
     my ($DISTANCE_SYMBOLS) = make_deflate_tables($size);
 
     my $symbols  = $entropy_sub->($fh);
@@ -2490,10 +2500,10 @@ This functionality is provided by the function C<bz2_compress()>, which can be e
     use Compression::Util qw(:all);
 
     my $data = do { open my $fh, '<:raw', $^X; local $/; <$fh> };
-    my $rle4 = rle4_encode([unpack('C*', $data)]);
-    my ($bwt, $idx) = bwt_encode(pack('C*', @$rle4));
+    my $rle4 = rle4_encode(string2symbols($data));
+    my ($bwt, $idx) = bwt_encode(symbols2string($rle4));
 
-    my ($mtf, $alphabet) = mtf_encode([unpack("C*", $bwt)]);
+    my ($mtf, $alphabet) = mtf_encode(string2symbols($bwt));
     my $rle = zrle_encode($mtf);
 
     my $enc = pack('N', $idx)
@@ -2632,6 +2642,9 @@ The encoding of input and output file-handles must be set to C<:raw>.
 
       bits2int($fh, $size, \$buffer)       # Inverse of `int2bits()`
       bits2int_lsb($fh, $size, \$buffer)   # Inverse of `int2bits_lsb()`
+
+      string2symbols($string)              # Returns an array-ref of code points
+      symbols2string(\@symbols)            # Returns a string, given an array of code points
 
       read_null_terminated($fh)            # Read a binary string that ends with NULL ("\0")
 
@@ -3292,6 +3305,18 @@ Read C<$size> bits from file-handle C<$fh> and convert them to an integer, in MS
     my $integer = bits2int_lsb($fh, $size, \$buffer)
 
 Read C<$size> bits from file-handle C<$fh> and convert them to an integer, in LSB order. Inverse of C<int2bits_lsb()>.
+
+=head2 string2symbols
+
+    my $symbols = string2symbols($string)
+
+Returns an array-ref of code points, given a string.
+
+=head2 symbols2string
+
+    my $string = symbols2string(\@symbols)
+
+Returns a string, given an array-ref of code points.
 
 =head2 read_null_terminated
 

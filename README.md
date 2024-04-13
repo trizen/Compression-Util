@@ -62,10 +62,10 @@ use List::Util qw(uniq);
 use Compression::Util qw(:all);
 
 my $data = do { open my $fh, '<:raw', $^X; local $/; <$fh> };
-my $rle4 = rle4_encode([unpack('C*', $data)]);
-my ($bwt, $idx) = bwt_encode(pack('C*', @$rle4));
+my $rle4 = rle4_encode(string2symbols($data));
+my ($bwt, $idx) = bwt_encode(symbols2string($rle4));
 
-my ($mtf, $alphabet) = mtf_encode([unpack("C*", $bwt)]);
+my ($mtf, $alphabet) = mtf_encode(string2symbols($bwt));
 my $rle = zrle_encode($mtf);
 
 my $enc = pack('N', $idx)
@@ -210,6 +210,9 @@ The encoding of input and output file-handles must be set to `:raw`.
 
       bits2int($fh, $size, \$buffer)       # Inverse of `int2bits()`
       bits2int_lsb($fh, $size, \$buffer)   # Inverse of `int2bits_lsb()`
+
+      string2symbols($string)              # Returns an array-ref of code points
+      symbols2string(\@symbols)            # Returns a string, given an array of code points
 
       read_null_terminated($fh)            # Read a binary string that ends with NULL ("\0")
 
@@ -997,6 +1000,22 @@ Read `$size` bits from file-handle `$fh` and convert them to an integer, in MSB 
 ```
 
 Read `$size` bits from file-handle `$fh` and convert them to an integer, in LSB order. Inverse of `int2bits_lsb()`.
+
+## string2symbols
+
+```perl
+    my $symbols = string2symbols($string)
+```
+
+Returns an array-ref of code points, given a string.
+
+## symbols2string
+
+```perl
+    my $string = symbols2string(\@symbols)
+```
+
+Returns a string, given an array-ref of code points.
 
 ## read\_null\_terminated
 
