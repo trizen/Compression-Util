@@ -9,7 +9,7 @@ require Exporter;
 our @ISA = qw(Exporter);
 
 our $VERBOSE = 0;        # verbose mode
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 # Arithmetic Coding settings
 use constant BITS         => 32;
