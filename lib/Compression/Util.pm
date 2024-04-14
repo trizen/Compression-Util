@@ -213,11 +213,19 @@ sub int2bits_lsb ($value, $size) {
 }
 
 sub bits2int ($fh, $size, $buffer) {
-    oct('0b' . join('', map { read_bit($fh, $buffer) } 1 .. $size));
+    my $bitstring = '0b';
+    for (1 .. $size) {
+        $bitstring .= ($$buffer // '') eq '' ? read_bit($fh, $buffer) : chop($$buffer);
+    }
+    oct($bitstring);
 }
 
 sub bits2int_lsb ($fh, $size, $buffer) {
-    oct('0b' . reverse(join('', map { read_bit_lsb($fh, $buffer) } 1 .. $size)));
+    my $bitstring = '';
+    for (1 .. $size) {
+        $bitstring .= ($$buffer // '') eq '' ? read_bit_lsb($fh, $buffer) : chop($$buffer);
+    }
+    oct('0b' . reverse($bitstring));
 }
 
 sub string2symbols ($string) {
@@ -1971,7 +1979,7 @@ sub deflate_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
     }
 
     my $size = bits2int($fh, 32, \my $buffer);
-    my ($DISTANCE_SYMBOLS,, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables($size);
+    my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS) = make_deflate_tables($size);
 
     my $len_symbols  = $entropy_sub->($fh);
     my $dist_symbols = $entropy_sub->($fh);
