@@ -4,9 +4,9 @@ use 5.036;
 use Test::More;
 use Compression::Util qw(:all);
 
-plan tests => 2;
+plan tests => 4;
 
-foreach my $file (__FILE__) {
+foreach my $file (__FILE__, __FILE__) {
 
     my $str = do {
         local $/;
@@ -19,4 +19,6 @@ foreach my $file (__FILE__) {
 
     ok(length($enc) < length($str));
     is($str, $dec);
+
+    $Compression::Util::LZ_THRESHOLD = 0;    # always use LZSS + hash table
 }

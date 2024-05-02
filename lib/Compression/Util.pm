@@ -8,8 +8,10 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERBOSE = 0;        # verbose mode
 our $VERSION = '0.05';
+
+our $LZ_THRESHOLD = 1 << 15;    # LZ index() vs. hash table crossover point
+our $VERBOSE      = 0;          # verbose mode
 
 # Arithmetic Coding settings
 use constant BITS         => 32;
@@ -2257,7 +2259,7 @@ sub lz77_encode ($str) {
         return lz77_encode_symbolic($str);
     }
 
-    if (length($str) > 1 << 15) {
+    if (length($str) > $LZ_THRESHOLD) {
         return lz77_encode_symbolic(string2symbols($str));
     }
 
@@ -2368,12 +2370,11 @@ sub lzss_encode ($str) {
     }
 
     # Call `_old_lzss_encode()` for short strings (faster)
-    if (length($str) <= 1 << 15) {
+    if (length($str) <= $LZ_THRESHOLD) {
         return _old_lzss_encode($str);
     }
 
-    my $la = 0;
-
+    my $la      = 0;
     my @symbols = unpack('C*', $str);
     my $end     = $#symbols;
 
@@ -2868,6 +2869,17 @@ An array of symbols means an array of non-negative integer values.
 An input filehandle is denoted by C<$fh>, while an output file-handle is denoted by C<$out_fh>.
 
 The encoding of input and output file-handles must be set to C<:raw>.
+
+=head1 PACKAGE VARIABLES
+
+B<Compression::Util> provides the following package variables:
+
+    $Compression::Util::VERBOSE = 0;           # true to enable verbose/debug mode
+    $Compression::Util::LZ_THRESHOLD = 1<<15;  # crossover point for LZ parsing
+
+The value of C<$LZ_THRESHOLD> controls how the LZ parsing is being done. For inputs with less than C<$LZ_THRESHOLD> characters, a simple algorithm is being used, based on the C<index()> function, while for larger inputs, a more efficient algorithm is being used, based on hash-tables.
+
+Setting C<$LZ_THRESHOLD = 0>, will force the usage of the hash-table based algorithm for all inputs, while setting C<$LZ_THRESHOLD = ~0>, the hash-table based algorithm will never be used.
 
 =head1 HIGH-LEVEL FUNCTIONS
 
