@@ -1,5 +1,22 @@
 Revision history for Compression-Util
 
+0.06    2024-05-??
+
+        [ADDITIONS]
+
+        - Added the lzssf_encode() and lzssf_decode() functions.
+        - Added the lzssf_compress() and lzssf_decompress() functions.
+        - Added the lz77_encode_symbolic() and lz77_decode_symbolic() functions.
+        - Added the lzhd_compress_symbolic() and lzhd_decompress_symbolic() functions.
+
+        [IMPROVEMENTS]
+
+        - Much faster algorithm in lz77_encode() and lzss_encode() for large enough strings.
+
+        [BUG-FIXES]
+
+        - The output of delta_encode() is now always deterministic.
+
 0.05    2024-04-13
 
         [ADDITIONS]

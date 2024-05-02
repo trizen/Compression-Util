@@ -14,8 +14,8 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = lzw_compress($str, undef, \&fibonacci_encode);
-    my $dec = lzw_decompress($enc, undef, \&fibonacci_decode);
+    my $enc = lzw_compress($str, undef, \&delta_encode);
+    my $dec = lzw_decompress($enc, undef, \&delta_decode);
 
     ok(length($enc) < length($str));
     is($str, $dec);

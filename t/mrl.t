@@ -17,10 +17,6 @@ foreach my $file (__FILE__) {
     my $enc = mrl_compress($str);
     my $dec = mrl_decompress($enc);
 
-    is($str, pack('C*', @$dec));
-
-    my $enc_sym = mrl_compress([reverse unpack('C*', $str)]);
-    my $dec_sym = mrl_decompress($enc_sym);
-
-    is(scalar(reverse($str)), pack('C*', @$dec_sym));
+    ok(length($enc) < length($str));
+    is($str, symbols2string($dec));
 }
