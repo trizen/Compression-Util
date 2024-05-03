@@ -14,8 +14,8 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = mrl_compress($str);
-    my $dec = mrl_decompress($enc);
+    my $enc = mrl_compress_symbolic($str);
+    my $dec = mrl_decompress_symbolic($enc);
 
     ok(length($enc) < length($str));
     is($str, symbols2string($dec));

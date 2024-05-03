@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# LZW compressor/decompressor + Elias Gamma coding, for compressing a given string.
+# Bzip2-like compressor/decompressor, for compressing a given string.
 
 use 5.036;
 use lib               qw(../lib);
@@ -18,8 +18,8 @@ foreach my $file (__FILE__, $^X) {
         <$fh>;
     };
 
-    my $enc = lzw_compress($str, \&elias_gamma_encode);
-    my $dec = lzw_decompress($enc, \&elias_gamma_decode);
+    my $enc = bz2_compress($str, \&create_ac_entry);
+    my $dec = bz2_decompress($enc, \&decode_ac_entry);
 
     say "Original size  : ", length($str);
     say "Compressed size: ", length($enc);

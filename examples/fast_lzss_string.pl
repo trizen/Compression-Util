@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# LZHD compressor/decompressor, for compressing a given string.
+# LZSS compressor/decompressor, for compressing a given string.
 
 use 5.036;
 use lib               qw(../lib);
@@ -18,8 +18,8 @@ foreach my $file (__FILE__, $^X) {
         <$fh>;
     };
 
-    my $enc = lzhd_compress($str, undef, \&create_adaptive_ac_entry);
-    my $dec = lzhd_decompress($enc, undef, \&decode_adaptive_ac_entry);
+    my $enc = lzss_compress($str, \&create_huffman_entry, \&lzss_encode_fast);
+    my $dec = lzss_decompress($enc);
 
     say "Original size  : ", length($str);
     say "Compressed size: ", length($enc);

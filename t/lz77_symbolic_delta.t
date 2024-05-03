@@ -14,8 +14,8 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = lzhd_compress_symbolic(string2symbols($str), undef, \&create_ac_entry, \&lzssf_encode);
-    my $dec = lzhd_decompress_symbolic($enc, \&decode_ac_entry);
+    my $enc = lz77_compress_symbolic($str, \&delta_encode);
+    my $dec = lz77_decompress_symbolic($enc, \&delta_decode);
 
     ok(length($enc) < length($str));
     is($str, symbols2string($dec));

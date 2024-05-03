@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# LZHD compressor/decompressor.
+# Bzip2-like compressor/decompressor, using symbolic BWT (although, unnecessary here).
 
 # usage:
 #   perl script.pl < input.txt > compressed.enc
@@ -19,13 +19,13 @@ getopts('d', \my %opts);
 
 sub compress ($fh, $out_fh) {
     while (read($fh, (my $chunk), CHUNK_SIZE)) {
-        lzhd_compress($chunk, $out_fh);
+        print $out_fh bz2_compress_symbolic(string2symbols($chunk));
     }
 }
 
 sub decompress ($fh, $out_fh) {
     while (!eof($fh)) {
-        lzhd_decompress($fh, $out_fh);
+        print $out_fh symbols2string(bz2_decompress_symbolic($fh));
     }
 }
 

@@ -4,14 +4,19 @@ Revision history for Compression-Util
 
         [ADDITIONS]
 
-        - Added the lzssf_encode() and lzssf_decode() functions.
-        - Added the lzssf_compress() and lzssf_decompress() functions.
-        - Added the lz77_encode_symbolic() and lz77_decode_symbolic() functions.
-        - Added the lzhd_compress_symbolic() and lzhd_decompress_symbolic() functions.
+        - Added the lzss_encode_fast() function.
+        - Added the lz77_compress_symbolic() and lz77_decompress_symbolic() functions.
 
         [IMPROVEMENTS]
 
-        - Much faster algorithm in lz77_encode() and lzss_encode() for large enough strings.
+        - Much faster algorithm in lzss_encode() for large enough strings.
+        - Extended lzss_compress() to accept an additional optional argument, specifying the LZSS encoding method.
+
+        [CHANGES]
+
+        - Removed the lzhd_compress() and lzhd_decompress() functions.
+        - Renamed the mrl_compress() and mrl_decompress() to mrl_compress_symbolic() and mrl_decompress_symbolic(), respectively.
+        - Simplified all functions to no longer take an optional output filehandle.
 
         [BUG-FIXES]
 

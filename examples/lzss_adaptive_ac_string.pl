@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# Bzip2-like compressor/decompressor, for compressing a given string.
+# LZSS compressor/decompressor, for compressing a given string.
 
 use 5.036;
 use lib               qw(../lib);
@@ -18,8 +18,8 @@ foreach my $file (__FILE__, $^X) {
         <$fh>;
     };
 
-    my $enc = bz2_compress($str, undef, \&create_ac_entry);
-    my $dec = bz2_decompress($enc, undef, \&decode_ac_entry);
+    my $enc = lzss_compress($str, \&create_adaptive_ac_entry);
+    my $dec = lzss_decompress($enc, \&decode_adaptive_ac_entry);
 
     say "Original size  : ", length($str);
     say "Compressed size: ", length($enc);

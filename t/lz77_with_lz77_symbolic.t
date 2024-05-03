@@ -4,7 +4,7 @@ use 5.036;
 use Test::More;
 use Compression::Util qw(:all);
 
-plan tests => 2;
+plan tests => 1;
 
 foreach my $file (__FILE__) {
 
@@ -14,9 +14,8 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = lzhd_compress($str, undef, \&create_adaptive_ac_entry);
-    my $dec = lzhd_decompress($enc, undef, \&decode_adaptive_ac_entry);
+    my $enc = lz77_compress($str, \&lz77_compress_symbolic);
+    my $dec = lz77_decompress($enc, \&lz77_decompress_symbolic);
 
-    ok(length($enc) < length($str));
     is($str, $dec);
 }

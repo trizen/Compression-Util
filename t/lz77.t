@@ -6,7 +6,7 @@ use Compression::Util qw(:all);
 
 plan tests => 4;
 
-foreach my $file (__FILE__, __FILE__) {
+foreach my $file (__FILE__) {
 
     my $str = do {
         local $/;
@@ -14,11 +14,19 @@ foreach my $file (__FILE__, __FILE__) {
         <$fh>;
     };
 
-    my $enc = lz77_compress($str);
-    my $dec = lz77_decompress($enc);
+    {    # regular
+        my $enc = lz77_compress($str);
+        my $dec = lz77_decompress($enc);
 
-    ok(length($enc) < length($str));
-    is($str, $dec);
+        ok(length($enc) < length($str));
+        is($str, $dec);
+    }
 
-    $Compression::Util::LZ_THRESHOLD = 0;    # always use LZ77 + hash table
+    {    # symbolic
+        my $enc = lz77_compress_symbolic($str);
+        my $dec = lz77_decompress_symbolic($enc);
+
+        ok(length($enc) < length($str));
+        is($str, symbols2string($dec));
+    }
 }

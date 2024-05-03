@@ -14,6 +14,7 @@
 #   https://youtube.com/watch?v=SJPvNi4HrWQ
 
 use 5.036;
+use lib               qw(../lib);
 use Digest::CRC       qw();
 use List::Util        qw(max);
 use Compression::Util qw(:all);

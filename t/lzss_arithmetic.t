@@ -14,8 +14,8 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = lzss_compress($str, undef, \&create_ac_entry);
-    my $dec = lzss_decompress($enc, undef, \&decode_ac_entry);
+    my $enc = lzss_compress($str, \&create_ac_entry);
+    my $dec = lzss_decompress($enc, \&decode_ac_entry);
 
     ok(length($enc) < length($str));
     is($str, $dec);
