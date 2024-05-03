@@ -290,6 +290,10 @@ sub accumulate ($deltas) {
 
 sub fibonacci_encode ($symbols) {
 
+    if (ref($symbols) eq '') {
+        return __SUB__->(string2symbols($symbols));
+    }
+
     my $bitstring = '';
 
     foreach my $n (scalar(@$symbols), @$symbols) {
@@ -456,6 +460,10 @@ sub _create_cfreq ($freq) {
 }
 
 sub ac_encode ($symbols) {
+
+    if (ref($symbols) eq '') {
+        return __SUB__->(string2symbols($symbols));
+    }
 
     my $enc        = '';
     my $EOF_SYMBOL = (max(@$symbols) // 0) + 1;
@@ -627,6 +635,10 @@ sub _increment_freq ($c, $alphabet_size, $freq, $cf) {
 }
 
 sub adaptive_ac_encode ($symbols) {
+
+    if (ref($symbols) eq '') {
+        return __SUB__->(string2symbols($symbols));
+    }
 
     my $enc        = '';
     my @alphabet   = sort { $a <=> $b } uniq(@$symbols);
@@ -1153,6 +1165,10 @@ sub _find_best_encoding_method ($integers) {
 
 sub delta_encode ($integers) {
 
+    if (ref($integers) eq '') {
+        return __SUB__->(string2symbols($integers));
+    }
+
     my $deltas = deltas($integers);
 
     my @methods = (
@@ -1547,7 +1563,7 @@ sub bz2_compress ($chunk, $entropy_sub = \&create_huffman_entry) {
     }
 
     my $rle1 = rle4_encode(string2symbols($chunk));
-    my ($bwt, $idx) = bwt_encode(symbols2string($rle1));
+    my ($bwt, $idx) = bwt_encode(pack('C*', @$rle1));
 
     $VERBOSE && say STDERR "BWT index = $idx";
 
@@ -1573,7 +1589,7 @@ sub bz2_decompress ($fh, $entropy_sub = \&decode_huffman_entry) {
     my $rle  = $entropy_sub->($fh);
     my $mtf  = zrle_decode($rle);
     my $bwt  = mtf_decode($mtf, $alphabet);
-    my $rle4 = bwt_decode(symbols2string($bwt), $idx);
+    my $rle4 = bwt_decode(pack('C*', @$bwt), $idx);
     my $data = rle4_decode(string2symbols($rle4));
 
     pack('C*', @$data);
@@ -1629,6 +1645,10 @@ sub bz2_decompress_symbolic ($fh, $entropy_sub = \&decode_huffman_entry) {
 
 sub create_ac_entry ($symbols) {
 
+    if (ref($symbols) eq '') {
+        return __SUB__->(string2symbols($symbols));
+    }
+
     my ($enc, $freq) = ac_encode($symbols);
     my $max_symbol = max(keys %$freq) // 0;
 
@@ -1676,8 +1696,11 @@ sub decode_ac_entry ($fh) {
 
 sub create_adaptive_ac_entry ($symbols) {
 
-    my ($enc, $alphabet) = adaptive_ac_encode($symbols);
+    if (ref($symbols) eq '') {
+        return __SUB__->(string2symbols($symbols));
+    }
 
+    my ($enc, $alphabet) = adaptive_ac_encode($symbols);
     pack('N', length($enc)) . encode_alphabet($alphabet) . pack("B*", $enc);
 }
 
@@ -1812,6 +1835,11 @@ sub huffman_from_freq ($freq) {
 }
 
 sub huffman_from_symbols ($symbols) {
+
+    if (ref($symbols) eq '') {
+        return __SUB__->(string2symbols($symbols));
+    }
+
     huffman_from_freq(frequencies($symbols));
 }
 
@@ -1820,6 +1848,10 @@ sub huffman_from_symbols ($symbols) {
 ########################
 
 sub create_huffman_entry ($symbols) {
+
+    if (ref($symbols) eq '') {
+        return __SUB__->(string2symbols($symbols));
+    }
 
     my $dict = huffman_from_symbols($symbols);
     my $enc  = huffman_encode($symbols, $dict);
@@ -2011,6 +2043,10 @@ sub deflate_decode ($fh, $entropy_sub = \&decode_huffman_entry) {
 
 sub elias_gamma_encode ($integers) {
 
+    if (ref($integers) eq '') {
+        return __SUB__->(string2symbols($integers));
+    }
+
     my $bitstring = '';
     foreach my $k (scalar(@$integers), @$integers) {
         my $t = sprintf('%b', $k + 1);
@@ -2051,6 +2087,10 @@ sub elias_gamma_decode ($fh) {
 #####################
 
 sub elias_omega_encode ($integers) {
+
+    if (ref($integers) eq '') {
+        return __SUB__->(string2symbols($integers));
+    }
 
     my $bitstring = '';
     foreach my $k (scalar(@$integers), @$integers) {
@@ -2270,12 +2310,11 @@ sub lz77_decode ($literals, $distances, $lengths) {
 
 sub _old_lzss_encode ($str) {    # fast only for short strings
 
-    my $la = 0;
-
     my $prefix = '';
     my @chars  = split(//, $str);
     my $end    = $#chars;
 
+    my $la      = 0;
     my $min_len = 3;
     my $max_len = 258;
 
