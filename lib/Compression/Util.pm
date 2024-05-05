@@ -2166,9 +2166,9 @@ sub lz77_encode_symbolic ($symbols) {
     my $la  = 0;
     my $end = $#$symbols;
 
-    my $min_len       = 4;      # minimum match length
-    my $max_len       = 255;    # maximum match length
-    my $max_chain_len = 32;     # how many recent positions to keep track of
+    my $min_len       = 4;                    # minimum match length
+    my $max_len       = 255;                  # maximum match length
+    my $max_chain_len = $LZ_MAX_CHAIN_LEN;    # how many recent positions to keep track of
 
     my (@literals, @distances, @lengths, %table);
 
