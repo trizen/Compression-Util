@@ -18,8 +18,10 @@ use File::Basename    qw(basename);
 use Compression::Util qw(:all);
 use List::Util        qw(all min max);
 
+local $Compression::Util::LZ_MAX_CHAIN_LEN = 16;    # higher values = better compression
+
 use constant {
-              WINDOW_SIZE => 32_768,    # 2^15
+              WINDOW_SIZE => 32_768,                          # 2^15
              };
 
 my $MAGIC  = pack('C*', 0x1f, 0x8b);    # magic MIME type

@@ -1,6 +1,6 @@
 Revision history for Compression-Util
 
-0.06    2024-05-??
+0.06    2024-05-05
 
         [ADDITIONS]
 
@@ -10,6 +10,7 @@ Revision history for Compression-Util
         [IMPROVEMENTS]
 
         - Much faster algorithm in lzss_encode() for large enough strings.
+        - Much better compression ratios achived by `lzss_encode()`.
         - Extended lzss_compress() to accept an additional optional argument, specifying the LZSS encoding method.
 
         [CHANGES]

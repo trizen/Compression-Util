@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 517;
+plan tests => 523;
 
 ##################################
 
@@ -203,6 +203,24 @@ is_deeply(lz77_decompress_symbolic(lz77_compress_symbolic([])),  []);
 }
 
 {
+    my $int1 = int(rand(1 << 5));
+    my $int2 = int(rand(1 << 6));
+    my $int3 = int(rand(1e6));
+
+    my $binary = pack('b*', int2bits_lsb($int1, 5) . int2bits_lsb($int2, 6) . int2bits_lsb($int3, 32));
+    open my $fh, '<:raw', \$binary;
+
+    my $buffer = '';
+    my $dec1   = bits2int_lsb($fh, 5,  \$buffer);
+    my $dec2   = bits2int_lsb($fh, 6,  \$buffer);
+    my $dec3   = bits2int_lsb($fh, 32, \$buffer);
+
+    is($int1, $dec1);
+    is($int2, $dec2);
+    is($int3, $dec3);
+}
+
+{
     my $int    = int(rand(1e6));
     my $binary = pack('b*', int2bits_lsb($int, 32));
     open my $fh, '<:raw', \$binary;
@@ -216,6 +234,24 @@ is_deeply(lz77_decompress_symbolic(lz77_compress_symbolic([])),  []);
     open my $fh, '<:raw', \$binary;
     my $dec = bits2int($fh, 32, \my $buffer);
     is($int, $dec);
+}
+
+{
+    my $int1 = int(rand(1 << 5));
+    my $int2 = int(rand(1 << 6));
+    my $int3 = int(rand(1e6));
+
+    my $binary = pack('B*', int2bits($int1, 5) . int2bits($int2, 6) . int2bits($int3, 32));
+    open my $fh, '<:raw', \$binary;
+
+    my $buffer = '';
+    my $dec1   = bits2int($fh, 5,  \$buffer);
+    my $dec2   = bits2int($fh, 6,  \$buffer);
+    my $dec3   = bits2int($fh, 32, \$buffer);
+
+    is($int1, $dec1);
+    is($int2, $dec2);
+    is($int3, $dec3);
 }
 
 {

@@ -8,10 +8,10 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
+our $VERBOSE = 0;        # verbose mode
 
-our $LZ_THRESHOLD = 1 << 15;    # LZ index() vs. hash table crossover point
-our $VERBOSE      = 0;          # verbose mode
+our $LZ_MAX_CHAIN_LEN = 32;    # how many recent positions to remember in LZ parsing
 
 # Arithmetic Coding settings
 use constant BITS         => 32;
@@ -219,6 +219,11 @@ sub int2bits_lsb ($value, $size) {
 }
 
 sub bits2int ($fh, $size, $buffer) {
+
+    if ($size % 8 == 0 and ($$buffer // '') eq '') {    # optimization
+        return oct('0b' . read_bits($fh, $size));
+    }
+
     my $bitstring = '0b';
     for (1 .. $size) {
         $bitstring .= ($$buffer // '') eq '' ? read_bit($fh, $buffer) : chop($$buffer);
@@ -227,6 +232,11 @@ sub bits2int ($fh, $size, $buffer) {
 }
 
 sub bits2int_lsb ($fh, $size, $buffer) {
+
+    if ($size % 8 == 0 and ($$buffer // '') eq '') {    # optimization
+        return oct('0b' . reverse(read_bits_lsb($fh, $size)));
+    }
+
     my $bitstring = '';
     for (1 .. $size) {
         $bitstring .= ($$buffer // '') eq '' ? read_bit_lsb($fh, $buffer) : chop($$buffer);
@@ -2308,74 +2318,15 @@ sub lz77_decode ($literals, $distances, $lengths) {
 # LZSS Encoding
 ###################
 
-sub _old_lzss_encode ($str) {    # fast only for short strings
-
-    my $prefix = '';
-    my @chars  = split(//, $str);
-    my $end    = $#chars;
-
-    my $la      = 0;
-    my $min_len = 3;
-    my $max_len = 258;
-
-    my (@literals, @distances, @lengths);
-
-    while ($la <= $end) {
-
-        my $n = 1;
-        my $p = length($prefix);
-        my $tmp;
-
-        my $token = $chars[$la];
-
-        while (    $n <= $max_len
-               and $la + $n <= $end
-               and ($tmp = rindex($prefix, $token, $p)) >= 0) {
-            $p = $tmp;
-            $token .= $chars[$la + $n];
-            ++$n;
-        }
-
-        if ($n > $min_len) {
-
-            push @lengths,   $n - 1;
-            push @distances, $la - $p;
-            push @literals,  undef;
-
-            $la += $n - 1;
-            $prefix .= substr($token, 0, -1);
-        }
-        else {
-            my @bytes;
-            push(@bytes, unpack('C*', substr($prefix, $p, $n - 1))) if ($n > 0);
-            push(@bytes, ord($chars[$la + $n - 1]));
-
-            push @lengths,   (0) x scalar(@bytes);
-            push @distances, (0) x scalar(@bytes);
-            push @literals, @bytes;
-
-            $la += $n;
-            $prefix .= $token;
-        }
-    }
-
-    return (\@literals, \@distances, \@lengths);
-}
-
 sub lzss_encode ($str) {
-
-    # Call `_old_lzss_encode()` for short strings (faster)
-    if (length($str) <= $LZ_THRESHOLD) {
-        return _old_lzss_encode($str);
-    }
 
     my $la      = 0;
     my @symbols = unpack('C*', $str);
     my $end     = $#symbols;
 
-    my $min_len       = 4;      # minimum match length
-    my $max_len       = 258;    # maximum match length
-    my $max_chain_len = 32;     # how many recent positions to keep track of
+    my $min_len       = 4;                    # minimum match length
+    my $max_len       = 258;                  # maximum match length
+    my $max_chain_len = $LZ_MAX_CHAIN_LEN;    # how many recent positions to keep track of
 
     my (@literals, @distances, @lengths, %table);
 
@@ -2836,11 +2787,13 @@ The encoding of file-handles must be set to C<:raw>.
 B<Compression::Util> provides the following package variables:
 
     $Compression::Util::VERBOSE = 0;           # true to enable verbose/debug mode
-    $Compression::Util::LZ_THRESHOLD = 1<<15;  # crossover point for LZSS parsing
+    $Compression::Util::LZ_MAX_CHAIN_LEN = 32; # how many recent positions to remember for each match
 
-The value of C<$LZ_THRESHOLD> controls how the LZSS parsing is being done. For inputs with less than C<$LZ_THRESHOLD> characters, a simple algorithm is being used, based on the C<index()> function, while for larger inputs, a more efficient algorithm is being used, based on hash-tables.
+=head2 $LZ_MAX_CHAIN_LEN
 
-Setting C<$LZ_THRESHOLD = 0>, will force the usage of the hash-table based algorithm for all inputs, while setting C<$LZ_THRESHOLD = ~0>, the hash-table based algorithm will never be used.
+The value of C<$LZ_MAX_CHAIN_LEN> controls the amount of recent positions to remember for each matched prefix. A larger value results in better compression, finding longer matches, at the expense of speed.
+
+By default, <$LZ_MAX_CHAIN_LEN> is set to C<32>.
 
 =head1 HIGH-LEVEL FUNCTIONS
 
@@ -3523,11 +3476,15 @@ Convert a non-negative integer to a bitstring of width C<$size>, in LSB order.
 
 Read C<$size> bits from file-handle C<$fh> and convert them to an integer, in MSB order. Inverse of C<int2bits()>.
 
+The function stores the extra bits inside the C<$buffer>, reading one character at a time from the filehandle.
+
 =head2 bits2int_lsb
 
     my $integer = bits2int_lsb($fh, $size, \$buffer)
 
 Read C<$size> bits from file-handle C<$fh> and convert them to an integer, in LSB order. Inverse of C<int2bits_lsb()>.
+
+The function stores the extra bits inside the C<$buffer>, reading one character at a time from the filehandle.
 
 =head2 string2symbols
 

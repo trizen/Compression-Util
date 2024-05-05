@@ -931,6 +931,8 @@ Convert a non-negative integer to a bitstring of width `$size`, in LSB order.
 
 Read `$size` bits from file-handle `$fh` and convert them to an integer, in MSB order. Inverse of `int2bits()`.
 
+The function stores the extra bits inside the `$buffer`, reading one character at a time from the filehandle.
+
 ## bits2int\_lsb
 
 ```perl
@@ -938,6 +940,8 @@ Read `$size` bits from file-handle `$fh` and convert them to an integer, in MSB 
 ```
 
 Read `$size` bits from file-handle `$fh` and convert them to an integer, in LSB order. Inverse of `int2bits_lsb()`.
+
+The function stores the extra bits inside the `$buffer`, reading one character at a time from the filehandle.
 
 ## string2symbols
 
