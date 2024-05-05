@@ -113,12 +113,14 @@ The encoding of file-handles must be set to `:raw`.
 
 ```perl
     $Compression::Util::VERBOSE = 0;           # true to enable verbose/debug mode
-    $Compression::Util::LZ_THRESHOLD = 1<<15;  # crossover point for LZSS parsing
+    $Compression::Util::LZ_MAX_CHAIN_LEN = 32; # how many recent positions to remember for each match
 ```
 
-The value of `$LZ_THRESHOLD` controls how the LZSS parsing is being done. For inputs with less than `$LZ_THRESHOLD` characters, a simple algorithm is being used, based on the `index()` function, while for larger inputs, a more efficient algorithm is being used, based on hash-tables.
+## $LZ\_MAX\_CHAIN\_LEN
 
-Setting `$LZ_THRESHOLD = 0`, will force the usage of the hash-table based algorithm for all inputs, while setting `$LZ_THRESHOLD = ~0`, the hash-table based algorithm will never be used.
+The value of `$LZ_MAX_CHAIN_LEN` controls the amount of recent positions to remember for each matched prefix. A larger value results in better compression, finding longer matches, at the expense of speed.
+
+By default, &lt;$LZ\_MAX\_CHAIN\_LEN> is set to `32`.
 
 # HIGH-LEVEL FUNCTIONS
 
