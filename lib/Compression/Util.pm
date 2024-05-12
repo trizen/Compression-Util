@@ -8,14 +8,14 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 our $VERBOSE = 0;        # verbose mode
 
 our $LZ_MAX_CHAIN_LEN = 32;     # how many recent positions to remember in LZ parsing
 our $LZSS_MIN_LEN     = 4;      # minmum match length in LZSS
 our $LZSS_MAX_LEN     = 258;    # maximum match length in LZSS
 
-our $LZ77_MIN_LEN = 4;          # LZ77 minimum match length
+our $LZ77_MIN_LEN = 4;          # LZ77 minimum match length (symbolic only)
 our $LZ77_MAX_LEN = 255;        # LZ77 maximum match length
 
 # Arithmetic Coding settings
@@ -156,7 +156,7 @@ our %EXPORT_TAGS = (
     ]
 );
 
-our @EXPORT_OK = (@{$EXPORT_TAGS{'all'}});
+our @EXPORT_OK = (@{$EXPORT_TAGS{'all'}}, '$VERBOSE', '$LZ_MAX_CHAIN_LEN', '$LZSS_MIN_LEN', '$LZSS_MAX_LEN', '$LZ77_MIN_LEN', '$LZ77_MAX_LEN');
 our @EXPORT;
 
 ##########################
@@ -2796,11 +2796,15 @@ B<Compression::Util> provides the following package variables:
     $Compression::Util::VERBOSE = 0;            # true to enable verbose/debug mode
     $Compression::Util::LZ_MAX_CHAIN_LEN = 32;  # how many recent positions to remember for each match in LZSS/LZ77 encoding
 
-    $Compression::Util::LZSS_MIN_LEN = 4;        # minimum match length in LZSS encoding
-    $Compression::Util::LZSS_MAX_LEN = 258;      # maximum match length in LZSS encoding
+    $Compression::Util::LZSS_MIN_LEN = 4;       # minimum match length in LZSS encoding
+    $Compression::Util::LZSS_MAX_LEN = 258;     # maximum match length in LZSS encoding
 
-    $Compression::Util::LZ77_MIN_LEN = 4;        # minimum match length in LZ77 encoding (symbolic only)
-    $Compression::Util::LZ77_MAX_LEN = 255;      # maximum match length in LZ77 encoding
+    $Compression::Util::LZ77_MIN_LEN = 4;       # minimum match length in LZ77 encoding (symbolic only)
+    $Compression::Util::LZ77_MAX_LEN = 255;     # maximum match length in LZ77 encoding
+
+The package variables can also be imported as:
+
+    use Compression::Util qw($LZ_MAX_CHAIN_LEN);
 
 =head2 $LZ_MAX_CHAIN_LEN
 

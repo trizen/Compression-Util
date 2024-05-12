@@ -115,11 +115,17 @@ The encoding of file-handles must be set to `:raw`.
     $Compression::Util::VERBOSE = 0;            # true to enable verbose/debug mode
     $Compression::Util::LZ_MAX_CHAIN_LEN = 32;  # how many recent positions to remember for each match in LZSS/LZ77 encoding
 
-    $Compression::Util::LZSS_MIN_LEN = 4;        # minimum match length in LZSS encoding
-    $Compression::Util::LZSS_MAX_LEN = 258;      # maximum match length in LZSS encoding
+    $Compression::Util::LZSS_MIN_LEN = 4;       # minimum match length in LZSS encoding
+    $Compression::Util::LZSS_MAX_LEN = 258;     # maximum match length in LZSS encoding
 
-    $Compression::Util::LZ77_MIN_LEN = 4;        # minimum match length in LZ77 encoding (symbolic only)
-    $Compression::Util::LZ77_MAX_LEN = 255;      # maximum match length in LZ77 encoding
+    $Compression::Util::LZ77_MIN_LEN = 4;       # minimum match length in LZ77 encoding (symbolic only)
+    $Compression::Util::LZ77_MAX_LEN = 255;     # maximum match length in LZ77 encoding
+```
+
+The package variables can also be imported as:
+
+```perl
+    use Compression::Util qw($LZ_MAX_CHAIN_LEN);
 ```
 
 ## $LZ\_MAX\_CHAIN\_LEN
