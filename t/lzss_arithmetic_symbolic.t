@@ -15,8 +15,8 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = bz2_compress_symbolic([map { ord($_) } $str =~ /(\X)/g], \&create_adaptive_ac_entry);
-    my $dec = bz2_decompress_symbolic($enc, \&decode_adaptive_ac_entry);
+    my $enc = lzss_compress_symbolic([map { ord($_) } $str =~ /(\X)/g], \&create_ac_entry);
+    my $dec = lzss_decompress_symbolic($enc, \&decode_ac_entry);
 
     ok(length($enc) < length($str));
     is($str, join('', map { chr($_) } @$dec));

@@ -14,8 +14,8 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = lz77_compress($str, \&bz2_compress_symbolic);
-    my $dec = lz77_decompress($enc, \&bz2_decompress_symbolic);
+    my $enc = lzss_compress($str, \&bwt_compress_symbolic);
+    my $dec = lzss_decompress($enc, \&bwt_decompress_symbolic);
 
     ok(length($enc) < length($str));
     is($str, $dec);

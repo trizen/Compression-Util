@@ -19,8 +19,8 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = bz2_compress_symbolic([map { ord($_) } $str =~ /(\X)/g], \&create_ac_entry);
-    my $dec = bz2_decompress_symbolic($enc, \&decode_ac_entry);
+    my $enc = bwt_compress_symbolic([map { ord($_) } $str =~ /(\X)/g]);
+    my $dec = bwt_decompress_symbolic($enc);
 
     say "Original size  : ", length($str);
     say "Compressed size: ", length($enc);

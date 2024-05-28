@@ -14,8 +14,8 @@ foreach my $file (__FILE__) {
         <$fh>;
     };
 
-    my $enc = bz2_compress($str, \&create_adaptive_ac_entry);
-    my $dec = bz2_decompress($enc, \&decode_adaptive_ac_entry);
+    my $enc = bwt_compress($str);
+    my $dec = bwt_decompress($enc);
 
     ok(length($enc) < length($str));
     is($str, $dec);

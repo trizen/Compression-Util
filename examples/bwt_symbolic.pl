@@ -19,13 +19,13 @@ getopts('d', \my %opts);
 
 sub compress ($fh, $out_fh) {
     while (read($fh, (my $chunk), CHUNK_SIZE)) {
-        print $out_fh bz2_compress_symbolic(string2symbols($chunk));
+        print $out_fh bwt_compress_symbolic(string2symbols($chunk));
     }
 }
 
 sub decompress ($fh, $out_fh) {
     while (!eof($fh)) {
-        print $out_fh symbols2string(bz2_decompress_symbolic($fh));
+        print $out_fh symbols2string(bwt_decompress_symbolic($fh));
     }
 }
 

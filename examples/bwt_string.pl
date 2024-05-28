@@ -18,8 +18,8 @@ foreach my $file (__FILE__, $^X) {
         <$fh>;
     };
 
-    my $enc = bz2_compress($str, \&create_adaptive_ac_entry);
-    my $dec = bz2_decompress($enc, \&decode_adaptive_ac_entry);
+    my $enc = bwt_compress($str);
+    my $dec = bwt_decompress($enc);
 
     say "Original size  : ", length($str);
     say "Compressed size: ", length($enc);
