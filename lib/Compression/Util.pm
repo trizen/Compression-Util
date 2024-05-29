@@ -2440,7 +2440,7 @@ sub lzss_encode_fast($str) {
 
         my $lookahead = join(' ', @lookahead_symbols);
 
-        if (exists($table{$lookahead}) and $table{$lookahead} <= $max_dist) {
+        if (exists($table{$lookahead}) and $la - $table{$lookahead} <= $max_dist) {
 
             my $p = $table{$lookahead};
             my $n = $min_len;
