@@ -4,6 +4,7 @@ Revision history for Compression-Util
 
         [ADDITIONS]
 
+        - Added the `lzb_compress()` and `lzb_decompress()` functions.
         - Added the `lzss_encode_symbolic()` and `lzss_decode_symbolic()` functions.
         - Added the `lzss_compress_symbolic()` and `lzss_decompress_symbolic()` functions.
         - Added the `$LZ_MAX_DIST` variable, which controls the maximum backreference allowed in LZ parsing.

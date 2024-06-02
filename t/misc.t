@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 610;
+plan tests => 639;
 
 ##################################
 
@@ -73,6 +73,9 @@ foreach my $str (
   ) {
     test_array(string2symbols($str));
 
+    is(lzb_decompress(lzb_compress($str)),                                               $str);
+    is(lzb_decompress(lzb_compress($str, \&lzss_encode_fast)),                           $str);
+    is(lz77_decompress(lz77_compress($str)),                                             $str);
     is(lzss_decompress(lzss_compress($str)),                                             $str);
     is(lzss_decompress(lzss_compress($str, \&create_huffman_entry, \&lzss_encode_fast)), $str);
     is(lzw_decompress(lzw_compress($str)),                                               $str);
@@ -146,6 +149,9 @@ is_deeply(lzss_decompress_symbolic(lzss_compress_symbolic([])),  []);
     is(lzw_decompress(lzw_compress($str, \&create_ac_entry),          \&decode_ac_entry),          $str);
     is(lzw_decompress(lzw_compress($str, \&create_huffman_entry),     \&decode_huffman_entry),     $str);
     is(lzw_decompress(lzw_compress($str, \&create_adaptive_ac_entry), \&decode_adaptive_ac_entry), $str);
+
+    is(lzb_decompress(lzb_compress($str)),                     $str);
+    is(lzb_decompress(lzb_compress($str, \&lzss_encode_fast)), $str);
 
     is(lz77_decompress(lz77_compress($str)), $str);
     is(lz77_decompress(lz77_compress($str, \&create_ac_entry),          \&decode_ac_entry),          $str);

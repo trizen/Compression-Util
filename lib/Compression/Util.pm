@@ -124,6 +124,9 @@ our %EXPORT_TAGS = (
           lz77_compress_symbolic
           lz77_decompress_symbolic
 
+          lzb_compress
+          lzb_decompress
+
           ac_encode
           ac_decode
 
@@ -2726,6 +2729,119 @@ sub lzss_decompress($fh, $entropy_sub = \&decode_huffman_entry) {
     lzss_decode($literals, $distances, $lengths);
 }
 
+#########################################
+# LZB -- LZSS with byte-oriented encoding
+#########################################
+
+sub lzb_compress ($chunk, $lzss_encoding_sub = \&lzss_encode) {
+
+    local $LZ_MAX_DIST = (1 << 16) - 1;
+    local $LZ_MAX_LEN  = ~0;
+
+    my ($literals, $distances, $lengths) = $lzss_encoding_sub->($chunk);
+
+    my $literals_end = $#{$literals};
+    my $data         = '';
+
+    for (my $i = 0 ; $i <= $literals_end ; ++$i) {
+
+        my $j = $i;
+        while ($i <= $literals_end and defined($literals->[$i])) {
+            ++$i;
+        }
+
+        my $literals_length = $i - $j;
+
+        my $dist      = $distances->[$i] // 0;
+        my $match_len = $lengths->[$i]   // 0;
+
+        $data .= chr((($literals_length >= 7 ? 7 : $literals_length) << 5) | ($match_len >= 31 ? 31 : $match_len));
+
+        $literals_length -= 7;
+        $match_len       -= 31;
+
+        while ($literals_length >= 0) {
+            $data .= $literals_length >= 255 ? "\xff" : chr($literals_length);
+            $literals_length -= 255;
+        }
+
+        if ($i > $j) {
+            $data .= pack('C*', @{$literals}[$j .. $i - 1]);
+        }
+
+        while ($match_len >= 0) {
+            $data .= $match_len >= 255 ? "\xff" : chr($match_len);
+            $match_len -= 255;
+        }
+
+        $data .= pack('B*', sprintf('%016b', $dist));
+    }
+
+    return $data;
+}
+
+sub lzb_decompress($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    my $data               = '';
+    my $search_window      = '';
+    my $search_window_size = 1 << 16;
+
+    while (!eof($fh)) {
+
+        my $len_byte = ord(getc($fh));
+
+        my $literals_length = $len_byte >> 5;
+        my $match_len       = $len_byte & 0b11111;
+
+        if ($literals_length == 7) {
+            while (1) {
+                my $byte_len = ord(getc($fh));
+                $literals_length += $byte_len;
+                last if $byte_len != 255;
+            }
+        }
+
+        my $literals = '';
+        if ($literals_length > 0) {
+            read($fh, $literals, $literals_length);
+        }
+
+        if ($match_len == 31) {
+            while (1) {
+                my $byte_len = ord(getc($fh));
+                $match_len += $byte_len;
+                last if $byte_len != 255;
+            }
+        }
+
+        my $offset = oct('0b' . unpack('B*', getc($fh) . getc($fh)));
+
+        $search_window .= $literals;
+
+        if ($offset == 1) {
+            $search_window .= substr($search_window, -1) x $match_len;
+        }
+        elsif ($offset >= $match_len) {    # non-overlapping matches
+            $search_window .= substr($search_window, length($search_window) - $offset, $match_len);
+        }
+        else {                             # overlapping matches
+            foreach my $i (1 .. $match_len) {
+                $search_window .= substr($search_window, length($search_window) - $offset, 1);
+            }
+        }
+
+        $data .= substr($search_window, -($match_len + $literals_length));
+        $search_window = substr($search_window, -$search_window_size) if (length($search_window) > 2 * $search_window_size);
+    }
+
+    return $data;
+}
+
 ################################################################
 # Encode a list of symbols, using offset bits and huffman coding
 ################################################################
@@ -3027,6 +3143,9 @@ By default, <$LZ_MAX_CHAIN_LEN> is set to C<32>.
       lz77_compress_symbolic(\@symbols)    # Symbolic LZ77 + Huffman coding of lengths and literals + OBH for distances
       lz77_decompress_symbolic($fh)        # Inverse of the above method
 
+      lzb_compress($string)                # LZSS compression, using a byte-aligned encoding method, similar to LZ4
+      lzb_decompress($fh)                  # Inverse of the above method
+
       lzw_compress($string)                # LZW + abc_encode() compression
       lzw_decompress($fh)                  # Inverse of the above method
 
@@ -3238,6 +3357,20 @@ The function accepts either a string or an array-ref of symbols as the first arg
     my $symbols = lzss_decompress_symbolic($string);
 
 Inverse of C<lzss_compress()> and C<lzss_compress_symbolic>, respectively.
+
+=head2 lzb_compress
+
+    my $string = lzb_compress($data);
+    my $string = lzb_compress($data, \&lzss_encode_fast);   # with fast-LZ parsing
+
+High-level function that performs byte-oriented LZSS compression, inspired by LZ4.
+
+=head2 lzb_decompress
+
+    my $data = lzb_decompress($fh);
+    my $data = lzb_decompress($string);
+
+Inverse of C<lzb_compress()>.
 
 =head2 lzw_compress
 

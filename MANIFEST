@@ -62,6 +62,7 @@ t/lz77_symbolic_delta.t
 t/lz77_with_bwt_symbolic.t
 t/lz77_with_lz77_symbolic.t
 t/lz77_with_mrl_symbolic.t
+t/lzb.t
 t/lzss.t
 t/lzss_adaptive_arithmetic.t
 t/lzss_arithmetic.t
