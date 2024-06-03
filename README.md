@@ -165,6 +165,9 @@ By default, &lt;$LZ\_MAX\_CHAIN\_LEN> is set to `32`.
       lz77_compress_symbolic(\@symbols)    # Symbolic LZ77 + Huffman coding of lengths and literals + OBH for distances
       lz77_decompress_symbolic($fh)        # Inverse of the above method
 
+      lzb_compress($string)                # LZSS compression, using a byte-aligned encoding method, similar to LZ4
+      lzb_decompress($fh)                  # Inverse of the above method
+
       lzw_compress($string)                # LZW + abc_encode() compression
       lzw_decompress($fh)                  # Inverse of the above method
 ```
@@ -401,6 +404,24 @@ The function accepts either a string or an array-ref of symbols as the first arg
 ```
 
 Inverse of `lzss_compress()` and `lzss_compress_symbolic`, respectively.
+
+## lzb\_compress
+
+```perl
+    my $string = lzb_compress($data);
+    my $string = lzb_compress($data, \&lzss_encode_fast);   # with fast-LZ parsing
+```
+
+High-level function that performs byte-oriented LZSS compression, inspired by LZ4.
+
+## lzb\_decompress
+
+```perl
+    my $data = lzb_decompress($fh);
+    my $data = lzb_decompress($string);
+```
+
+Inverse of `lzb_compress()`.
 
 ## lzw\_compress
 
