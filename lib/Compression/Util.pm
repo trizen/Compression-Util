@@ -907,6 +907,10 @@ sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
 
 sub bwt_encode ($s, $LOOKAHEAD_LEN = 128) {
 
+    if (ref($s) eq 'ARRAY') {
+        return bwt_encode_symbolic($s);
+    }
+
     my $bwt = bwt_sort($s, $LOOKAHEAD_LEN);
     my $ret = join('', map { substr($s, $_ - 1, 1) } @$bwt);
 
