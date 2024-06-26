@@ -3122,7 +3122,7 @@ These package variables can also be imported as:
 
 Minimum length of a match in LZ parsing. The value must be an integer greater than or equal to C<2>. Larger values will result in faster parsing, but lower compression ratio.
 
-By default, <$LZ_MIN_LEN> is set to C<4>.
+By default, C<$LZ_MIN_LEN> is set to C<4>.
 
 B<NOTE:> for C<lzss_encode_fast()> is recommended to set C<$LZ_MIN_LEN = 5>, which will result in slightly better compression ratio.
 
@@ -3130,7 +3130,7 @@ B<NOTE:> for C<lzss_encode_fast()> is recommended to set C<$LZ_MIN_LEN = 5>, whi
 
 Maximum length of a match in LZ parsing. The value must be an integer greater than or equal to C<0>.
 
-By default, <$LZ_MAX_LEN> is set to C<258>.
+By default, C<$LZ_MAX_LEN> is set to C<258>.
 
 B<NOTE:> the functions C<lz77_encode()> and C<lzb_compress()> will ignore this value and will always use unlimited match lengths.
 
@@ -4074,7 +4074,7 @@ By specifying the B<:all> keyword, will export all the exportable functions:
 
 Nothing is exported by default.
 
-=head2 EXAMPLES
+=head1 EXAMPLES
 
 The functions can be combined in various ways, easily creating novel compression methods, as illustrated in the following examples.
 
