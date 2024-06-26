@@ -8,7 +8,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 our $VERBOSE = 0;        # verbose mode
 
 our $LZ_MIN_LEN       = 4;      # minimum match length in LZ parsing
@@ -3512,7 +3512,7 @@ Inverse of C<mrl_compress_symbolic()>.
 
     my $freq = frequencies(\@symbols);
 
-Returns an hash ref dictionary with frequencies, given an array of symbols.
+Returns an hash ref dictionary with frequencies, given an array-ref of symbols.
 
 =head2 deltas
 
@@ -3598,7 +3598,7 @@ Inverse of C<elias_omega_encode()>.
 
 Encodes a sequence of non-negative integers using the Adaptive Binary Concatenation encoding method.
 
-This method is particularly effective in encoding a sequence of integers that are in ascending order.
+This method is particularly effective in encoding a sequence of integers that are in ascending order or have roughly the same size in binary.
 
 =head2 abc_decode
 
@@ -3682,14 +3682,14 @@ Inverse of C<mtf_encode()>.
 
     my $string = encode_alphabet(\@alphabet);
 
-Efficienlty encodes an alphabet of symbols into a binary string.
+Encodes an alphabet of symbols into a binary string.
 
 =head2 decode_alphabet
 
     my $alphabet = decode_alphabet($fh);
     my $alphabet = decode_alphabet($string);
 
-Decodes an encoded alphabet, given a file-handle or a binary string, returning an array of symbols. Inverse of C<encode_alphabet()>.
+Decodes an encoded alphabet, given a file-handle or a binary string, returning an array-ref of symbols. Inverse of C<encode_alphabet()>.
 
 =head2 run_length
 
@@ -3930,7 +3930,7 @@ The prefix codes are in canonical form, as defined in RFC 1951 (Section 3.2.2).
     my $dict = huffman_from_symbols(\@symbols);
     my ($dict, $rev_dict) = huffman_from_symbols(\@symbols);
 
-Low-level function that constructs Huffman prefix codes, given an array of symbols.
+Low-level function that constructs Huffman prefix codes, given an array-ref of symbols.
 
 It takes a single parameter, C<\@symbols>, from which it computes the frequency of each symbol and generates the corresponding Huffman prefix codes.
 
