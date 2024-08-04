@@ -1,5 +1,15 @@
 Revision history for Compression-Util
 
+0.10    2024-08-??
+
+        [ADDITIONS]
+
+        - Added the `mrl_compress()` and `mrl_decompress()` functions, for compressing/decompressing strings.
+
+        [FIXES]
+
+        - Fixed an issue in `lzb_decompress($fh)`, when there is more data after the LZB block.
+
 0.09    2024-06-26
 
         - Generalized `make_deflate_tables()` to generate tables for arbitrarily large distances and match lengths.

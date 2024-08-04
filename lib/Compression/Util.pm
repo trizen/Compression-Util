@@ -1567,6 +1567,8 @@ sub mrl_compress_symbolic ($symbols, $entropy_sub = \&create_huffman_entry) {
     encode_alphabet($alphabet) . $entropy_sub->($rle4);
 }
 
+*mrl_compress = \&mrl_compress_symbolic;
+
 sub mrl_decompress_symbolic ($fh, $entropy_sub = \&decode_huffman_entry) {
 
     if (ref($fh) eq '') {
@@ -1584,6 +1586,10 @@ sub mrl_decompress_symbolic ($fh, $entropy_sub = \&decode_huffman_entry) {
     my $symbols = mtf_decode($mtf, $alphabet);
 
     return $symbols;
+}
+
+sub mrl_decompress($fh, $entropy_sub = \&decode_huffman_entry) {
+    symbols2string(mrl_decompress_symbolic($fh, $entropy_sub));
 }
 
 ############################################################
@@ -2785,7 +2791,7 @@ sub lzb_compress ($chunk, $lzss_encoding_sub = \&lzss_encode) {
         $data .= pack('B*', sprintf('%016b', $dist));
     }
 
-    return $data;
+    return fibonacci_encode([length $data]) . $data;
 }
 
 sub lzb_decompress($fh) {
@@ -2799,37 +2805,37 @@ sub lzb_decompress($fh) {
     my $search_window      = '';
     my $search_window_size = 1 << 16;
 
-    while (!eof($fh)) {
+    my $block_size = fibonacci_decode($fh)->[0] // die "decompression error";
+    read($fh, (my $block), $block_size);
 
-        my $len_byte = ord(getc($fh));
+    while ($block ne '') {
+
+        my $len_byte = ord substr($block, 0, 1, '');
 
         my $literals_length = $len_byte >> 5;
         my $match_len       = $len_byte & 0b11111;
 
         if ($literals_length == 7) {
             while (1) {
-                my $byte_len = ord(getc($fh));
+                my $byte_len = ord substr($block, 0, 1, '');
                 $literals_length += $byte_len;
                 last if $byte_len != 255;
             }
         }
 
-        my $literals = '';
         if ($literals_length > 0) {
-            read($fh, $literals, $literals_length);
+            $search_window .= substr($block, 0, $literals_length, '');
         }
 
         if ($match_len == 31) {
             while (1) {
-                my $byte_len = ord(getc($fh));
+                my $byte_len = ord substr($block, 0, 1, '');
                 $match_len += $byte_len;
                 last if $byte_len != 255;
             }
         }
 
-        my $offset = oct('0b' . unpack('B*', getc($fh) . getc($fh)));
-
-        $search_window .= $literals;
+        my $offset = oct('0b' . unpack('B*', substr($block, 0, 2, '')));
 
         if ($offset >= $match_len) {    # non-overlapping matches
             $search_window .= substr($search_window, length($search_window) - $offset, $match_len);
@@ -3161,7 +3167,10 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       create_adaptive_ac_entry(\@symbols)  # Create an Adaptive Arithmetic Coding block
       decode_adaptive_ac_entry($fh)        # Decode an Adaptive Arithmetic Coding block
 
-      mrl_compress_symbolic(\@symbols)     # MRL compression (MTF+ZRLE+RLE4+Huffman coding)
+      mrl_compress($string)                # MRL compression (MTF+ZRLE+RLE4+Huffman coding)
+      mrl_decompress($fh)                  # Inverse of the above method
+
+      mrl_compress_symbolic(\@symbols)     # Symbolic MRL compression (MTF+ZRLE+RLE4+Huffman coding)
       mrl_decompress_symbolic($fh)         # Inverse of the above method
 
       bwt_compress($string)                # Bzip2-like compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
@@ -3173,7 +3182,7 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       lzss_compress($string)               # LZSS + DEFLATE-like encoding of lengths and distances
       lzss_decompress($fh)                 # Inverse of the above method
 
-      lzss_compress_symbolic($string)      # Symbolic LZSS + DEFLATE-like encoding of lengths and distances
+      lzss_compress_symbolic(\@symbols)    # Symbolic LZSS + DEFLATE-like encoding of lengths and distances
       lzss_decompress_symbolic($fh)        # Inverse of the above method
 
       lz77_compress($string)               # LZ77 + Huffman coding of lengths and literals + OBH for distances
@@ -3477,13 +3486,15 @@ Similar to C<bwt_compress()>, except that it accepts an arbitrary array-ref of n
 
 Inverse of C<bwt_compress_symbolic()>.
 
-=head2 mrl_compress_symbolic
+=head2 mrl_compress / mrl_compress_symbolic
 
     # Does Huffman coding
-    my $string = mrl_compress_symbolic(\@symbols);
+    my $enc = mrl_compress($str);
+    my $enc = mrl_compress_symbolic(\@symbols);
 
     # Does Arithmetic coding
-    my $string = mrl_compress_symbolic(\@symbols, \&create_ac_entry);
+    my $enc = mrl_compress($str, \&create_ac_entry);
+    my $enc = mrl_compress_symbolic(\@symbols, \&create_ac_entry);
 
 A fast compression method, using the following pipeline:
 
@@ -3494,9 +3505,13 @@ A fast compression method, using the following pipeline:
 
 It accepts an arbitrary array-ref of non-negative integer values as input.
 
-=head2 mrl_decompress_symbolic
+=head2 mrl_decompress / mrl_decompress_symbolic
 
     # Using Huffman coding
+    my $str = mrl_decompress($fh);
+    my $str = mrl_decompress($string);
+
+    # Using Huffman coding (symbolic)
     my $symbols = mrl_decompress_symbolic($fh);
     my $symbols = mrl_decompress_symbolic($string);
 
@@ -4078,27 +4093,37 @@ Nothing is exported by default.
 
 The functions can be combined in various ways, easily creating novel compression methods, as illustrated in the following examples.
 
-Combining LZSS + MRL compression:
+=head2 Combining LZSS + MRL compression:
 
     my $enc = lzss_compress($str, \&mrl_compress_symbolic);
     my $dec = lzss_decompress($enc, \&mrl_decompress_symbolic);
 
-Combining LZ77 + OBH encoding:
+=head2 Combining LZ77 + OBH encoding:
 
     my $enc = lz77_compress($str, \&obh_encode);
     my $dec = lz77_decompress($enc, \&obh_decode);
 
-Combining LZSS + BWT compression:
+=head2 Combining LZSS + symbolic BWT compression:
 
     my $enc = lzss_compress($str, \&bwt_compress_symbolic);
     my $dec = lzss_decompress($enc, \&bwt_decompress_symbolic);
 
-Combining LZW + Fibonacci encoding:
+=head2 Combining BWT + symbolic LZSS:
+
+    my $enc = bwt_compress($str, \&lzss_compress_symbolic);
+    my $dec = bwt_decompress($enc, \&lzss_decompress_symbolic);
+
+=head2 Combining LZW + Fibonacci encoding:
 
     my $enc = lzw_compress($str, \&fibonacci_encode);
     my $dec = lzw_decompress($enc, \&fibonacci_decode);
 
-Combining LZ77 + BWT compression + Fibonacci encoding + Huffman coding + OBH encoding + MRL compression:
+=head2 Combining BWT + symbolic LZ77 + symbolic MRL:
+
+    my $enc = bwt_compress($str, sub ($s) { lz77_compress_symbolic($s, \&mrl_compress_symbolic) });
+    my $dec = bwt_decompress($enc, sub ($s) { lz77_decompress_symbolic($s, \&mrl_decompress_symbolic) });
+
+=head2 Combining LZ77 + BWT compression + Fibonacci encoding + Huffman coding + OBH encoding + MRL compression:
 
     # Compression
     my $enc = do {
