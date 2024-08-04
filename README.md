@@ -271,10 +271,13 @@ By default, `$LZ_MAX_CHAIN_LEN` is set to `32`.
       read_bits_lsb($fh, $len)             # Read `$len` bits from file-handle (LSB)
 
       int2bits($symbol, $size)             # Convert an integer to bits of width `$size` (MSB)
-      int2bits_lsb($symbol, $size)         # Convert an integer to bits of width `$size) (LSB)
+      int2bits_lsb($symbol, $size)         # Convert an integer to bits of width `$size` (LSB)
 
       bits2int($fh, $size, \$buffer)       # Inverse of `int2bits()`
       bits2int_lsb($fh, $size, \$buffer)   # Inverse of `int2bits_lsb()`
+
+      bytes2int($fh, $n)                   # Read `$n` bytes from file-handle as an integer (MSB)
+      bytes2int_lsb($fh, $n)               # Read `$n` bytes from file-handle as an integer (LSB)
 
       string2symbols($string)              # Returns an array-ref of code points
       symbols2string(\@symbols)            # Returns a string, given an array of code points
@@ -1012,6 +1015,22 @@ The function stores the extra bits inside the `$buffer`, reading one character a
 Read `$size` bits from file-handle `$fh` and convert them to an integer, in LSB order. Inverse of `int2bits_lsb()`.
 
 The function stores the extra bits inside the `$buffer`, reading one character at a time from the file-handle.
+
+## bytes2int
+
+```perl
+    my $integer = bytes2int($fh, $n);
+```
+
+Read `$n` bytes from file-handle `$fh` and convert them to an integer, in MSB order.
+
+## bytes2int\_lsb
+
+```perl
+    my $integer = bytes2int_lsb($fh, $n);
+```
+
+Read `$n` bytes from file-handle `$fh` and convert them to an integer, in LSB order.
 
 ## string2symbols
 

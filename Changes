@@ -5,6 +5,7 @@ Revision history for Compression-Util
         [ADDITIONS]
 
         - Added the `mrl_compress()` and `mrl_decompress()` functions, for compressing/decompressing strings.
+        - Added the `bytes2int()` and `bytes2int_lsb()` functions.
 
         [CHANGES]
 

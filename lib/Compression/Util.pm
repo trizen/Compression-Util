@@ -36,6 +36,9 @@ our %EXPORT_TAGS = (
           bits2int
           bits2int_lsb
 
+          bytes2int
+          bytes2int_lsb
+
           string2symbols
           symbols2string
 
@@ -191,8 +194,7 @@ sub read_bit_lsb ($fh, $bitstring) {
 
 sub read_bits ($fh, $bits_len) {
 
-    my $data = '';
-    read($fh, $data, $bits_len >> 3);
+    read($fh, (my $data), $bits_len >> 3);
     $data = unpack('B*', $data);
 
     while (length($data) < $bits_len) {
@@ -208,8 +210,7 @@ sub read_bits ($fh, $bits_len) {
 
 sub read_bits_lsb ($fh, $bits_len) {
 
-    my $data = '';
-    read($fh, $data, $bits_len >> 3);
+    read($fh, (my $data), $bits_len >> 3);
     $data = unpack('b*', $data);
 
     while (length($data) < $bits_len) {
@@ -231,10 +232,22 @@ sub int2bits_lsb ($value, $size) {
     scalar reverse sprintf("%0*b", $size, $value);
 }
 
+sub bytes2int($fh, $n) {
+    my $bytes = '';
+    $bytes .= getc($fh) for (1 .. $n);
+    oct('0b' . unpack('B*', $bytes));
+}
+
+sub bytes2int_lsb ($fh, $n) {
+    my $bytes = '';
+    $bytes .= getc($fh) for (1 .. $n);
+    oct('0b' . reverse unpack('b*', $bytes));
+}
+
 sub bits2int ($fh, $size, $buffer) {
 
     if ($size % 8 == 0 and ($$buffer // '') eq '') {    # optimization
-        return oct('0b' . read_bits($fh, $size));
+        return bytes2int($fh, $size >> 3);
     }
 
     my $bitstring = '0b';
@@ -247,7 +260,7 @@ sub bits2int ($fh, $size, $buffer) {
 sub bits2int_lsb ($fh, $size, $buffer) {
 
     if ($size % 8 == 0 and ($$buffer // '') eq '') {    # optimization
-        return oct('0b' . reverse(read_bits_lsb($fh, $size)));
+        return bytes2int_lsb($fh, $size >> 3);
     }
 
     my $bitstring = '';
@@ -1621,7 +1634,7 @@ sub bwt_decompress ($fh, $entropy_sub = \&decode_huffman_entry) {
         return __SUB__->($fh2, $entropy_sub);
     }
 
-    my $idx      = bits2int($fh, 32, \my $buffer);
+    my $idx      = bytes2int($fh, 4);
     my $alphabet = decode_alphabet($fh);
 
     $VERBOSE && say STDERR "BWT index = $idx";
@@ -1665,7 +1678,7 @@ sub bwt_decompress_symbolic ($fh, $entropy_sub = \&decode_huffman_entry) {
         return __SUB__->($fh2, $entropy_sub);
     }
 
-    my $idx      = bits2int($fh, 32, \my $buffer);
+    my $idx      = bytes2int($fh, 4);
     my $alphabet = decode_alphabet($fh);
 
     $VERBOSE && say STDERR "BWT index = $idx";
@@ -1923,7 +1936,7 @@ sub decode_huffman_entry ($fh) {
     my $code_lengths = delta_decode($fh);
     my (undef, $rev_dict) = huffman_from_code_lengths($code_lengths);
 
-    my $enc_len = bits2int($fh, 32, \my $buffer);
+    my $enc_len = bytes2int($fh, 4);
     $VERBOSE && say STDERR "Encoded length: $enc_len\n";
 
     if ($enc_len > 0) {
@@ -3316,10 +3329,13 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       read_bits_lsb($fh, $len)             # Read `$len` bits from file-handle (LSB)
 
       int2bits($symbol, $size)             # Convert an integer to bits of width `$size` (MSB)
-      int2bits_lsb($symbol, $size)         # Convert an integer to bits of width `$size) (LSB)
+      int2bits_lsb($symbol, $size)         # Convert an integer to bits of width `$size` (LSB)
 
       bits2int($fh, $size, \$buffer)       # Inverse of `int2bits()`
       bits2int_lsb($fh, $size, \$buffer)   # Inverse of `int2bits_lsb()`
+
+      bytes2int($fh, $n)                   # Read `$n` bytes from file-handle as an integer (MSB)
+      bytes2int_lsb($fh, $n)               # Read `$n` bytes from file-handle as an integer (LSB)
 
       string2symbols($string)              # Returns an array-ref of code points
       symbols2string(\@symbols)            # Returns a string, given an array of code points
@@ -3930,6 +3946,18 @@ The function stores the extra bits inside the C<$buffer>, reading one character 
 Read C<$size> bits from file-handle C<$fh> and convert them to an integer, in LSB order. Inverse of C<int2bits_lsb()>.
 
 The function stores the extra bits inside the C<$buffer>, reading one character at a time from the file-handle.
+
+=head2 bytes2int
+
+    my $integer = bytes2int($fh, $n);
+
+Read C<$n> bytes from file-handle C<$fh> and convert them to an integer, in MSB order.
+
+=head2 bytes2int_lsb
+
+    my $integer = bytes2int_lsb($fh, $n);
+
+Read C<$n> bytes from file-handle C<$fh> and convert them to an integer, in LSB order.
 
 =head2 string2symbols
 
