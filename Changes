@@ -6,6 +6,11 @@ Revision history for Compression-Util
 
         - Added the `mrl_compress()` and `mrl_decompress()` functions, for compressing/decompressing strings.
 
+        [CHANGES]
+
+        - Changed the order of values returned by `lz77_encode()`.
+        - Changed the order of arguments accepted by `lz77_decode()`.
+
         [FIXES]
 
         - Fixed an issue in `lzb_decompress($fh)`, when there is more data after the LZB block.

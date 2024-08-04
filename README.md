@@ -175,7 +175,10 @@ By default, `$LZ_MAX_CHAIN_LEN` is set to `32`.
       create_adaptive_ac_entry(\@symbols)  # Create an Adaptive Arithmetic Coding block
       decode_adaptive_ac_entry($fh)        # Decode an Adaptive Arithmetic Coding block
 
-      mrl_compress_symbolic(\@symbols)     # MRL compression (MTF+ZRLE+RLE4+Huffman coding)
+      mrl_compress($string)                # MRL compression (MTF+ZRLE+RLE4+Huffman coding)
+      mrl_decompress($fh)                  # Inverse of the above method
+
+      mrl_compress_symbolic(\@symbols)     # Symbolic MRL compression (MTF+ZRLE+RLE4+Huffman coding)
       mrl_decompress_symbolic($fh)         # Inverse of the above method
 
       bwt_compress($string)                # Bzip2-like compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
@@ -187,7 +190,7 @@ By default, `$LZ_MAX_CHAIN_LEN` is set to `32`.
       lzss_compress($string)               # LZSS + DEFLATE-like encoding of lengths and distances
       lzss_decompress($fh)                 # Inverse of the above method
 
-      lzss_compress_symbolic($string)      # Symbolic LZSS + DEFLATE-like encoding of lengths and distances
+      lzss_compress_symbolic(\@symbols)    # Symbolic LZSS + DEFLATE-like encoding of lengths and distances
       lzss_decompress_symbolic($fh)        # Inverse of the above method
 
       lz77_compress($string)               # LZ77 + Huffman coding of lengths and literals + OBH for distances
@@ -532,14 +535,16 @@ Similar to `bwt_compress()`, except that it accepts an arbitrary array-ref of no
 
 Inverse of `bwt_compress_symbolic()`.
 
-## mrl\_compress\_symbolic
+## mrl\_compress / mrl\_compress\_symbolic
 
 ```perl
     # Does Huffman coding
-    my $string = mrl_compress_symbolic(\@symbols);
+    my $enc = mrl_compress($str);
+    my $enc = mrl_compress(\@symbols);
 
     # Does Arithmetic coding
-    my $string = mrl_compress_symbolic(\@symbols, \&create_ac_entry);
+    my $enc = mrl_compress($str, \&create_ac_entry);
+    my $enc = mrl_compress(\@symbols, \&create_ac_entry);
 ```
 
 A fast compression method, using the following pipeline:
@@ -551,19 +556,23 @@ A fast compression method, using the following pipeline:
 
 It accepts an arbitrary array-ref of non-negative integer values as input.
 
-## mrl\_decompress\_symbolic
+## mrl\_decompress / mrl\_decompress\_symbolic
 
 ```perl
-    # Using Huffman coding
+    # With Huffman coding
+    my $data = mrl_decompress($fh);
+    my $data = mrl_decompress($string);
+
+    # Symbolic, with Huffman coding
     my $symbols = mrl_decompress_symbolic($fh);
     my $symbols = mrl_decompress_symbolic($string);
 
-    # Using Arithmetic coding
+    # Symbolic, with Arithmetic coding
     my $symbols = mrl_decompress_symbolic($fh, \&decode_ac_entry);
     my $symbols = mrl_decompress_symbolic($string, \&decode_ac_entry);
 ```
 
-Inverse of `mrl_compress_symbolic()`.
+Inverse of `mrl_decompress()` and `mrl_compress_symbolic()`.
 
 # INTERFACE FOR MEDIUM-LEVEL FUNCTIONS
 
@@ -1141,8 +1150,8 @@ The function returns the decoded sequence of symbols as an array-ref.
 ## lz77\_encode / lz77\_encode\_symbolic
 
 ```perl
-    my ($literals, $lengths, $matches, $distances) = lz77_encode($string);
-    my ($literals, $lengths, $matches, $distances) = lz77_encode(\@symbols);
+    my ($literals, $distances, $lengths, $matches) = lz77_encode($string);
+    my ($literals, $distances, $lengths, $matches) = lz77_encode(\@symbols);
 ```
 
 Low-level function that combines LZSS with ideas from the LZ4 method.
@@ -1151,9 +1160,9 @@ The function returns four values:
 
 ```perl
     $literals   # array-ref of uncompressed symbols
+    $distances  # array-ref of back-reference distances
     $lengths    # array-ref of literal lengths
     $matches    # array-ref of match lengths
-    $distances  # array-ref of back-reference distances
 ```
 
 The output can be decoded with `lz77_decode()` and `lz77_decode_symbolic()`, respectively.
@@ -1161,15 +1170,15 @@ The output can be decoded with `lz77_decode()` and `lz77_decode_symbolic()`, res
 ## lz77\_decode / lz77\_decode\_symbolic
 
 ```perl
-    my $string  = lz77_decode(\@literals, \@lengths, \@matches, \@distances);
-    my $symbols = lz77_decode_symbolic(\@literals, \@lengths, \@matches, \@distances);
+    my $string  = lz77_decode(\@literals, \@distances, \@lengths, \@matches);
+    my $symbols = lz77_decode_symbolic(\@literals, \@distances, \@lengths, \@matches);
 ```
 
 Low-level function that performs decoding using the provided literals, lengths, matches and distances of matched sub-strings.
 
 Inverse of `lz77_encode()` and `lz77_encode_symbolic()`, respectively.
 
-## lzss\_encode / lzss\_encode\_symbolic / lzss\_encode\_fast
+## lzss\_encode / lzss\_encode\_fast / lzss\_encode\_symbolic / lzss\_encode\_fast\_symbolic
 
 ```perl
     # Standard version
@@ -1200,7 +1209,7 @@ The output can be decoded with `lzss_decode()` and `lzss_decode_symbolic`, respe
 
 Low-level function that decodes the LZSS encoding, using the provided literals, distances, and lengths of matched sub-strings.
 
-Inverse of `lzss_encode()`, `lzss_encode_symbolic` and `lzss_encode_fast()`.
+Inverse of `lzss_encode()` and `lzss_encode_fast()`.
 
 ## deflate\_encode
 
@@ -1271,40 +1280,54 @@ Nothing is exported by default.
 
 The functions can be combined in various ways, easily creating novel compression methods, as illustrated in the following examples.
 
-Combining LZSS + MRL compression:
+## Combining LZSS + MRL compression:
 
 ```perl
     my $enc = lzss_compress($str, \&mrl_compress_symbolic);
     my $dec = lzss_decompress($enc, \&mrl_decompress_symbolic);
 ```
 
-Combining LZ77 + OBH encoding:
+## Combining LZ77 + OBH encoding:
 
 ```perl
     my $enc = lz77_compress($str, \&obh_encode);
     my $dec = lz77_decompress($enc, \&obh_decode);
 ```
 
-Combining LZSS + BWT compression:
+## Combining LZSS + symbolic BWT compression:
 
 ```perl
     my $enc = lzss_compress($str, \&bwt_compress_symbolic);
     my $dec = lzss_decompress($enc, \&bwt_decompress_symbolic);
 ```
 
-Combining LZW + Fibonacci encoding:
+## Combining BWT + symbolic LZSS:
+
+```perl
+    my $enc = bwt_compress($str, \&lzss_compress_symbolic);
+    my $dec = bwt_decompress($enc, \&lzss_decompress_symbolic);
+```
+
+## Combining LZW + Fibonacci encoding:
 
 ```perl
     my $enc = lzw_compress($str, \&fibonacci_encode);
     my $dec = lzw_decompress($enc, \&fibonacci_decode);
 ```
 
-Combining LZ77 + BWT compression + Fibonacci encoding + Huffman coding + OBH encoding + MRL compression:
+## Combining BWT + symbolic LZ77 + symbolic MRL:
+
+```perl
+    my $enc = bwt_compress($str, sub ($s) { lz77_compress_symbolic($s, \&mrl_compress_symbolic) });
+    my $dec = bwt_decompress($enc, sub ($s) { lz77_decompress_symbolic($s, \&mrl_decompress_symbolic) });
+```
+
+## Combining LZ77 + BWT compression + Fibonacci encoding + Huffman coding + OBH encoding + MRL compression:
 
 ```perl
     # Compression
     my $enc = do {
-        my ($literals, $lengths, $matches, $distances) = lz77_encode($str);
+        my ($literals, $distances, $lengths, $matches) = lz77_encode($str);
         bwt_compress(symbols2string($literals))
           . fibonacci_encode($lengths)
           . create_huffman_entry($matches)
@@ -1318,7 +1341,7 @@ Combining LZ77 + BWT compression + Fibonacci encoding + Huffman coding + OBH enc
         my $lengths   = fibonacci_decode($fh);
         my $matches   = decode_huffman_entry($fh);
         my $distances = obh_decode($fh, \&mrl_decompress_symbolic);
-        lz77_decode($literals, $lengths, $matches, $distances);
+        lz77_decode($literals, $distances, $lengths, $matches);
     };
 ```
 
