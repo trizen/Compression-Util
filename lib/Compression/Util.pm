@@ -59,6 +59,9 @@ our %EXPORT_TAGS = (
           bwt_compress_symbolic
           bwt_decompress_symbolic
 
+          mrl_compress
+          mrl_decompress
+
           mrl_compress_symbolic
           mrl_decompress_symbolic
 
