@@ -8,7 +8,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 our $VERBOSE = 0;        # verbose mode
 
 our $LZ_MIN_LEN       = 4;      # minimum match length in LZ parsing
