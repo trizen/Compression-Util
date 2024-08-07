@@ -1193,7 +1193,7 @@ The output can be decoded with `lz77_decode()` and `lz77_decode_symbolic()`, res
     my $symbols = lz77_decode_symbolic(\@literals, \@distances, \@lengths, \@matches);
 ```
 
-Low-level function that performs decoding using the provided literals, lengths, matches and distances of matched sub-strings.
+Low-level function that performs decoding using the provided literals, distances, lengths and matches, returned by LZ77 encoding.
 
 Inverse of `lz77_encode()` and `lz77_encode_symbolic()`, respectively.
 

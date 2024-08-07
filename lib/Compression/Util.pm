@@ -4093,7 +4093,7 @@ The output can be decoded with C<lz77_decode()> and C<lz77_decode_symbolic()>, r
     my $string  = lz77_decode(\@literals, \@distances, \@lengths, \@matches);
     my $symbols = lz77_decode_symbolic(\@literals, \@distances, \@lengths, \@matches);
 
-Low-level function that performs decoding using the provided literals, lengths, matches and distances of matched sub-strings.
+Low-level function that performs decoding using the provided literals, distances, lengths and matches, returned by LZ77 encoding.
 
 Inverse of C<lz77_encode()> and C<lz77_encode_symbolic()>, respectively.
 
