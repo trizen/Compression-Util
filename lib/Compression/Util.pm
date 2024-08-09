@@ -11,10 +11,10 @@ our @ISA = qw(Exporter);
 our $VERSION = '0.10';
 our $VERBOSE = 0;        # verbose mode
 
-our $LZ_MIN_LEN       = 4;      # minimum match length in LZ parsing
-our $LZ_MAX_LEN       = 258;    # maximum match length in LZ parsing
-our $LZ_MAX_DIST      = ~0;     # maximum allowed back-reference distance in LZ parsing
-our $LZ_MAX_CHAIN_LEN = 32;     # how many recent positions to remember in LZ parsing
+our $LZ_MIN_LEN       = 4;          # minimum match length in LZ parsing
+our $LZ_MAX_LEN       = 1 << 15;    # maximum match length in LZ parsing
+our $LZ_MAX_DIST      = ~0;         # maximum allowed back-reference distance in LZ parsing
+our $LZ_MAX_CHAIN_LEN = 32;         # how many recent positions to remember in LZ parsing
 
 # Arithmetic Coding settings
 use constant BITS         => 32;
@@ -3183,7 +3183,7 @@ B<Compression::Util> provides the following package variables:
     $Compression::Util::VERBOSE = 0;           # true to enable verbose/debug mode
 
     $Compression::Util::LZ_MIN_LEN = 4;        # minimum match length in LZ parsing
-    $Compression::Util::LZ_MAX_LEN = 258;      # maximum match length in LZ parsing
+    $Compression::Util::LZ_MAX_LEN = 1 << 15;  # maximum match length in LZ parsing
 
     $Compression::Util::LZ_MAX_DIST = ~0;      # maximum back-reference distance allowed
     $Compression::Util::LZ_MAX_CHAIN_LEN = 32; # how many recent positions to remember for each match in LZ parsing
@@ -3209,7 +3209,7 @@ B<NOTE:> for C<lzss_encode_fast()> is recommended to set C<$LZ_MIN_LEN = 5>, whi
 
 Maximum length of a match in LZ parsing. The value must be an integer greater than or equal to C<0>.
 
-By default, C<$LZ_MAX_LEN> is set to C<258>.
+By default, C<$LZ_MAX_LEN> is set to C<32768>.
 
 B<NOTE:> the functions C<lz77_encode()> and C<lzb_compress()> will ignore this value and will always use unlimited match lengths.
 
@@ -3249,7 +3249,7 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       bwt_compress($string)                # Bzip2-like compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
       bwt_decompress($fh)                  # Inverse of the above method
 
-      bwt_compress_symbolic(\@symbols)     # Bzip2-like compression (RLE4+sBWT+MTF+ZRLE+Huffman coding)
+      bwt_compress_symbolic(\@symbols)     # Symbolic Bzip2-like compression (RLE4+sBWT+MTF+ZRLE+Huffman coding)
       bwt_decompress_symbolic($fh)         # Inverse of the above method
 
       lzss_compress($string)               # LZSS + DEFLATE-like encoding of lengths and distances
@@ -3275,28 +3275,28 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       deltas(\@ints)                       # Computes the differences between integers
       accumulate(\@deltas)                 # Inverse of the above method
 
-      delta_encode(\@ints)                 # Delta+RLE encoding of an array of integers
+      delta_encode(\@ints)                 # Delta+RLE encoding of an array-ref of integers
       delta_decode($fh)                    # Inverse of the above method
 
-      fibonacci_encode(\@symbols)          # Fibonacci coding of an array of symbols
+      fibonacci_encode(\@symbols)          # Fibonacci coding of an array-ref of symbols
       fibonacci_decode($fh)                # Inverse of the above method
 
-      elias_gamma_encode(\@symbols)        # Elias Gamma coding method of an array of symbols
+      elias_gamma_encode(\@symbols)        # Elias Gamma coding method of an array-ref of symbols
       elias_gamma_decode($fh)              # Inverse of the above method
 
-      elias_omega_encode(\@symbols)        # Elias Omega coding method of an array of symbols
+      elias_omega_encode(\@symbols)        # Elias Omega coding method of an array-ref of symbols
       elias_omega_decode($fh)              # Inverse of the above method
 
-      abc_encode(\@symbols)                # Adaptive Binary Concatenation method of an array of symbols
+      abc_encode(\@symbols)                # Adaptive Binary Concatenation method of an array-ref of symbols
       abc_decode($fh)                      # Inverse of the above method
 
-      obh_encode(\@symbols)                # Offset bits + Huffman coding of an array of symbols
+      obh_encode(\@symbols)                # Offset bits + Huffman coding of an array-ref of symbols
       obh_decode($fh)                      # Inverse of the above method
 
       bwt_encode($string)                  # Burrows-Wheeler transform
       bwt_decode($bwt, $idx)               # Inverse of Burrows-Wheeler transform
 
-      bwt_encode_symbolic(\@symbols)       # Burrows-Wheeler transform over an array of symbols
+      bwt_encode_symbolic(\@symbols)       # Burrows-Wheeler transform over an array-ref of symbols
       bwt_decode_symbolic(\@bwt, $idx)     # Inverse of symbolic Burrows-Wheeler transform
 
       mtf_encode(\@symbols)                # Move-to-front transform
@@ -3306,7 +3306,7 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       decode_alphabet($fh)                 # Inverse of the above method
 
       frequencies(\@symbols)               # Returns a dictionary with symbol frequencies
-      run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array
+      run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array-ref
 
       rle4_encode(\@symbols, $max=255)     # Run-length encoding with 4 or more consecutive characters
       rle4_decode(\@rle4)                  # Inverse of the above method
@@ -3314,10 +3314,10 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       zrle_encode(\@symbols)               # Run-length encoding of zeros
       zrle_decode(\@zrle)                  # Inverse of the above method
 
-      ac_encode(\@symbols)                 # Arithmetic Coding applied on an array of symbols
+      ac_encode(\@symbols)                 # Arithmetic Coding applied on an array-ref of symbols
       ac_decode($bitstring, \%freq)        # Inverse of the above method
 
-      adaptive_ac_encode(\@symbols)               # Adaptive Arithmetic Coding applied on an array of symbols
+      adaptive_ac_encode(\@symbols)               # Adaptive Arithmetic Coding applied on an array-ref of symbols
       adaptive_ac_decode($bitstring, \@alphabet)  # Inverse of the above method
 
       lzw_encode($string)                  # LZW encoding of a given string
@@ -3341,7 +3341,7 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       bytes2int_lsb($fh, $n)               # Read `$n` bytes from file-handle as an integer (LSB)
 
       string2symbols($string)              # Returns an array-ref of code points
-      symbols2string(\@symbols)            # Returns a string, given an array of code points
+      symbols2string(\@symbols)            # Returns a string, given an array-ref of code points
 
       read_null_terminated($fh)            # Read a binary string that ends with NULL ("\0")
 
@@ -3349,23 +3349,34 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       binary_vrl_decode($bitstring)        # Binary variable run-length decoding
 
       bwt_sort($string)                    # Burrows-Wheeler sorting
-      bwt_sort_symbolic(\@symbols)         # Burrows-Wheeler sorting, applied on an array of symbols
+      bwt_sort_symbolic(\@symbols)         # Burrows-Wheeler sorting, applied on an array-ref of symbols
 
       huffman_encode(\@symbols, \%dict)    # Huffman encoding
       huffman_decode($bitstring, \%dict)   # Huffman decoding, given a string of bits
 
-      huffman_from_freq(\%freq)            # Create Huffman dictionaries, given an hash of frequencies
-      huffman_from_symbols(\@symbols)      # Create Huffman dictionaries, given an array of symbols
-      huffman_from_code_lengths(\@lens)    # Create canonical Huffman codes, given an array of code lengths
+      huffman_from_freq(\%freq)            # Create Huffman dictionaries, given an hash-ref of frequencies
+      huffman_from_symbols(\@symbols)      # Create Huffman dictionaries, given an array-ref of symbols
+      huffman_from_code_lengths(\@lens)    # Create canonical Huffman codes, given an array-ref of code lengths
 
       make_deflate_tables($max_dist, $max_len) # Returns the DEFLATE tables for distance and length symbols
       find_deflate_index($value, \@table)      # Returns the index in a DEFLATE table, given a numerical value
 
-      lzss_encode($string)                     # LZSS encoding of a string into literals, distances and lengths
-      lzss_encode_fast($string)                # Fast-LZSS encoding of a string into literals, distances and lengths
-      lzss_decode(\@lits, \@idxs, \@lens)      # Inverse of the above two methods
+      lzss_encode($string)                     # LZSS encoding into literals, distances and lengths
+      lzss_encode_symbolic(\@symbols)          # LZSS encoding into literals, distances and lengths (symbolic)
 
-      deflate_encode(\@lits, \@idxs, \@lens)   # DEFLATE-like encoding of values returned by lzss_encode()
+      lzss_encode_fast($string)                # Fast-LZSS encoding into literals, distances and lengths
+      lzss_encode_fast_symbolic(\@symbols)     # Fast-LZSS encoding into literals, distances and lengths (symbolic)
+
+      lzss_decode(\@lits, \@dist, \@lens)          # Inverse of lzss_encode() and lzss_encode_fast()
+      lzss_decode_symbolic(\@lits, \@dist, \@lens) # Inverse of lzss_encode_symbolic() and lzss_encode_fast_symbolic()
+
+      lz77_encode($string)                         # LZ77 encoding into literals, distances, lengths and matches
+      lz77_encode_symbolic(\@symbols)              # LZ77 encoding into literals, distances, lengths and matches (symbolic)
+
+      lz77_decode(\@lits, \@dist, \@lens, \@matches)           # Inverse of lz77_encode()
+      lz77_decode_symbolic(\@lits, \@dist, \@lens, \@matches)  # Inverse of lz77_encode_symbolic()
+
+      deflate_encode(\@lits, \@dist, \@lens)   # DEFLATE-like encoding of values returned by lzss_encode()
       deflate_decode($fh)                      # Inverse of the above method
 
 =head1 INTERFACE FOR HIGH-LEVEL FUNCTIONS
@@ -3445,7 +3456,7 @@ The function accepts either a string or an array-ref of symbols as the first arg
     my $symbols = lz77_decompress_symbolic($fh);
     my $symbols = lz77_decompress_symbolic($string);
 
-Inverse of C<lz77_compress()> and C<lz77_compress_symbolic>, respectively.
+Inverse of C<lz77_compress()> and C<lz77_compress_symbolic()>, respectively.
 
 =head2 lzss_compress / lzss_compress_symbolic
 
@@ -3480,7 +3491,7 @@ The function accepts either a string or an array-ref of symbols as the first arg
     my $symbols = lzss_decompress_symbolic($fh);
     my $symbols = lzss_decompress_symbolic($string);
 
-Inverse of C<lzss_compress()> and C<lzss_compress_symbolic>, respectively.
+Inverse of C<lzss_compress()> and C<lzss_compress_symbolic()>, respectively.
 
 =head2 lzb_compress
 
@@ -3624,6 +3635,8 @@ Inverse of C<deltas()>.
 Encodes a sequence of integers (including negative integers) using Delta + Run-length + Elias omega coding, returning a binary string.
 
 Delta encoding calculates the difference between consecutive integers in the sequence and encodes these differences using Elias omega coding. When it's beneficial, runs of identical symbols are collapsed with RLE.
+
+This method supports both positive and negative integers.
 
 =head2 delta_decode
 
@@ -4115,7 +4128,7 @@ The function returns three values:
     $distances  # array-ref of back-reference distances
     $lengths    # array-ref of match lengths
 
-The output can be decoded with C<lzss_decode()> and C<lzss_decode_symbolic>, respectively.
+The output can be decoded with C<lzss_decode()> and C<lzss_decode_symbolic()>, respectively.
 
 =head2 lzss_decode / lzss_decode_symbolic
 
