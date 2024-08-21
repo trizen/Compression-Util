@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 641;
+plan tests => 657;
 
 ##################################
 
@@ -282,6 +282,46 @@ is_deeply(lzss_decompress_symbolic(lzss_compress_symbolic([])),  []);
     open my $fh, '<:raw', \$binary;
     my $dec = bytes2int_lsb($fh, 4);
     is($int, $dec);
+}
+
+{
+    my $int    = int(rand(1e6));
+    my $binary = pack('b*', int2bits_lsb($int, 32));
+    my $dec    = bytes2int_lsb($binary, 4);
+    is($int, $dec);
+}
+
+{
+    my $int    = int(rand(1e6));
+    my $binary = pack('B*', int2bits($int, 32));
+    my $dec    = bytes2int($binary, 4);
+    is($int, $dec);
+}
+
+{
+    is(bytes2int_lsb(int2bytes_lsb(97, 1), 1), 97);
+    is(bytes2int(int2bytes(97, 1), 1),         97);
+
+    is(bytes2int(int2bytes_lsb(97, 1), 1), 97);
+    is(bytes2int_lsb(int2bytes(97, 1), 1), 97);
+
+    is(bytes2int_lsb(int2bytes_lsb(97, 1), 1), 97);
+    is(bytes2int(int2bytes(97, 1), 1),         97);
+
+    is(bytes2int(int2bytes_lsb(97, 1), 1), 97);
+    is(bytes2int_lsb(int2bytes(97, 1), 1), 97);
+
+    my $value = int(rand(1e6));
+
+    is(bytes2int(int2bytes($value, 3), 3),         $value);
+    is(bytes2int_lsb(int2bytes_lsb($value, 3), 3), $value);
+
+    my $int = 19225;
+    is(bytes2int(int2bytes($int, 2), 2),         $int);
+    is(bytes2int_lsb(int2bytes_lsb($int, 2), 2), $int);
+
+    is(bytes2int(int2bytes_lsb($int, 2), 2), 6475);
+    is(bytes2int_lsb(int2bytes($int, 2), 2), 6475);
 }
 
 {

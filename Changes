@@ -2,9 +2,14 @@ Revision history for Compression-Util
 
 0.11    2024-??-??
 
+        [ADDITIONS]
+
+        - Added the `int2bytes()` and `int2bytes_lsb()` functions.
+
         [IMPROVEMENTS]
 
         - Minor documentation improvements.
+        - Slightly more efficient encoding of the alphabet, in function `encode_alphabet()`.
 
         [CHANGES]
 

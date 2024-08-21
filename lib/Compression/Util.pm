@@ -33,6 +33,9 @@ our %EXPORT_TAGS = (
           int2bits
           int2bits_lsb
 
+          int2bytes
+          int2bytes_lsb
+
           bits2int
           bits2int_lsb
 
@@ -235,19 +238,44 @@ sub int2bits_lsb ($value, $size) {
     scalar reverse sprintf("%0*b", $size, $value);
 }
 
+sub int2bytes ($value, $size) {
+    pack('B*', sprintf("%0*b", 8 * $size, $value));
+}
+
+sub int2bytes_lsb ($value, $size) {
+    pack('b*', scalar reverse sprintf("%0*b", 8 * $size, $value));
+}
+
 sub bytes2int($fh, $n) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $n);
+    }
+
     my $bytes = '';
     $bytes .= getc($fh) for (1 .. $n);
     oct('0b' . unpack('B*', $bytes));
 }
 
 sub bytes2int_lsb ($fh, $n) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $n);
+    }
+
     my $bytes = '';
     $bytes .= getc($fh) for (1 .. $n);
     oct('0b' . reverse unpack('b*', $bytes));
 }
 
 sub bits2int ($fh, $size, $buffer) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $size, $buffer);
+    }
 
     if ($size % 8 == 0 and ($$buffer // '') eq '') {    # optimization
         return bytes2int($fh, $size >> 3);
@@ -261,6 +289,11 @@ sub bits2int ($fh, $size, $buffer) {
 }
 
 sub bits2int_lsb ($fh, $size, $buffer) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2, $size, $buffer);
+    }
 
     if ($size % 8 == 0 and ($$buffer // '') eq '') {    # optimization
         return bytes2int_lsb($fh, $size >> 3);
@@ -1367,10 +1400,10 @@ sub _encode_alphabet_256 ($alphabet) {
     my $populated = 0;
     my @marked;
 
-    for (my $i = 0 ; $i <= 255 ; $i += 32) {
+    for (my $i = 0 ; $i <= 255 ; $i += 16) {
 
         my $enc = 0;
-        foreach my $j (0 .. 31) {
+        foreach my $j (0 .. 15) {
             if (exists($table{$i + $j})) {
                 $enc |= 1 << $j;
             }
@@ -1380,36 +1413,34 @@ sub _encode_alphabet_256 ($alphabet) {
 
         if ($enc > 0) {
             $populated |= 1;
-            push @marked, 0xffffffff - $enc;
+            push @marked, $enc;
         }
     }
 
-    my $delta = delta_encode(\@marked);
+    my $bitstring = join('', map { int2bits_lsb($_, 16) } @marked);
 
-    $VERBOSE && say STDERR "Populated : ", sprintf('%08b', $populated);
+    $VERBOSE && say STDERR "Populated : ", sprintf('%016b', $populated);
     $VERBOSE && say STDERR "Marked    : @marked";
-    $VERBOSE && say STDERR "Delta len : ", length($delta);
+    $VERBOSE && say STDERR "Bits len  : ", length($bitstring);
 
     my $encoded = '';
-    $encoded .= chr($populated);
-    $encoded .= $delta;
+    $encoded .= int2bytes($populated, 2);
+    $encoded .= pack('B*', $bitstring);
     return $encoded;
 }
 
 sub _decode_alphabet_256 ($fh) {
 
-    my @populated = split(//, sprintf('%08b', ord(getc($fh))));
-    my @marked    = map { 0xffffffff - $_ } @{delta_decode($fh)};
-
     my @alphabet;
-    for (my $i = 0 ; $i <= 255 ; $i += 32) {
-        if (shift(@populated)) {
-            my $m = shift(@marked);
-            foreach my $j (0 .. 31) {
-                if ($m & 1) {
-                    push @alphabet, $i + $j;
+    my $l1 = bytes2int($fh, 2);
+
+    for my $i (0 .. 15) {
+        if ($l1 & (0x8000 >> $i)) {
+            my $l2 = bytes2int($fh, 2);
+            for my $j (0 .. 15) {
+                if ($l2 & (0x8000 >> $j)) {
+                    push @alphabet, 16 * $i + $j;
                 }
-                $m >>= 1;
             }
         }
     }
@@ -1419,10 +1450,18 @@ sub _decode_alphabet_256 ($fh) {
 
 sub encode_alphabet ($alphabet) {
 
-    my $max_symbol = max(@$alphabet) // -1;
+    my $max_symbol = $alphabet->[-1] // -1;
 
     if ($max_symbol <= 255) {
-        return (chr(1) . _encode_alphabet_256($alphabet));
+
+        my $delta = delta_encode($alphabet);
+        my $enc   = _encode_alphabet_256($alphabet);
+
+        if (length($delta) < length($enc)) {
+            return (chr(0) . $delta);
+        }
+
+        return (chr(1) . $enc);
     }
 
     return (chr(0) . delta_encode($alphabet));
@@ -3340,6 +3379,9 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       bytes2int($fh, $n)                   # Read `$n` bytes from file-handle as an integer (MSB)
       bytes2int_lsb($fh, $n)               # Read `$n` bytes from file-handle as an integer (LSB)
 
+      int2bytes($symbol, $size)            # Convert an integer into `$size` bytes. (MSB)
+      int2bytes_lsb($symbol, $size)        # Convert an integer into `$size` bytes. (LSB)
+
       string2symbols($string)              # Returns an array-ref of code points
       symbols2string(\@symbols)            # Returns a string, given an array-ref of code points
 
@@ -3947,33 +3989,47 @@ Convert a non-negative integer to a bitstring of width C<$size>, in MSB order.
 
 Convert a non-negative integer to a bitstring of width C<$size>, in LSB order.
 
+=head2 int2bytes
+
+    my $string = int2bytes($symbol, $size);
+
+Convert a non-negative integer to a byte-string of width C<$size>, in MSB order.
+
+=head2 int2bytes_lsb
+
+    my $string = int2bytes_lsb($symbol, $size);
+
+Convert a non-negative integer to a byte-string of width C<$size>, in LSB order.
+
 =head2 bits2int
 
-    my $integer = bits2int($fh, $size, \$buffer)
+    my $integer = bits2int($fh, $size, \$buffer);
 
-Read C<$size> bits from file-handle C<$fh> and convert them to an integer, in MSB order. Inverse of C<int2bits()>.
+Read C<$size> bits from a file-handle C<$fh> and convert them to an integer, in MSB order. Inverse of C<int2bits()>.
 
 The function stores the extra bits inside the C<$buffer>, reading one character at a time from the file-handle.
 
 =head2 bits2int_lsb
 
-    my $integer = bits2int_lsb($fh, $size, \$buffer)
+    my $integer = bits2int_lsb($fh, $size, \$buffer);
 
-Read C<$size> bits from file-handle C<$fh> and convert them to an integer, in LSB order. Inverse of C<int2bits_lsb()>.
+Read C<$size> bits from a file-handle C<$fh> and convert them to an integer, in LSB order. Inverse of C<int2bits_lsb()>.
 
 The function stores the extra bits inside the C<$buffer>, reading one character at a time from the file-handle.
 
 =head2 bytes2int
 
     my $integer = bytes2int($fh, $n);
+    my $integer = bytes2int($str, $n);
 
-Read C<$n> bytes from file-handle C<$fh> and convert them to an integer, in MSB order.
+Read C<$n> bytes from a file-handle C<$fh> or from a string C<$str> and convert them to an integer, in MSB order.
 
 =head2 bytes2int_lsb
 
     my $integer = bytes2int_lsb($fh, $n);
+    my $integer = bytes2int_lsb($str, $n);
 
-Read C<$n> bytes from file-handle C<$fh> and convert them to an integer, in LSB order.
+Read C<$n> bytes from a file-handle C<$fh> or from a string C<$str> and convert them to an integer, in LSB order.
 
 =head2 string2symbols
 
