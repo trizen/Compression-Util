@@ -3201,7 +3201,7 @@ sub bzip2_compress($fh) {
         my $crc32 = crc32(pack('b*', unpack('B*', $chunk)));
         $VERBOSE && say STDERR "CRC32: $crc32";
 
-        $crc32 = oct('0b' . int2bits_lsb($crc32, 32)) & 0xffffffff;
+        $crc32 = oct('0b' . int2bits_lsb($crc32, 32));
         $VERBOSE && say STDERR "Bzip2-CRC32: $crc32";
 
         # FIXME: there is a bug in the computation of stream_crc32?
@@ -3276,6 +3276,8 @@ sub bzip2_decompress($fh) {
 
         $VERBOSE && say STDERR "Compression level: $level";
 
+        my $stream_crc32 = 0;
+
         while (!eof($fh)) {
 
             my $block_magic = pack "B48", join('', map { read_bit($fh, \$buffer) } 1 .. 48);
@@ -3285,6 +3287,8 @@ sub bzip2_decompress($fh) {
 
                 my $crc32 = bits2int($fh, 32, \$buffer);
                 $VERBOSE && say STDERR "CRC32 = $crc32";
+
+                $stream_crc32 = ($crc32 ^ (0xffffffff & (($stream_crc32 << 1) | ($stream_crc32 >> 31))));
 
                 my $randomized = read_bit($fh, \$buffer);
                 $randomized == 0 or die "randomized not supported";
@@ -3420,8 +3424,13 @@ sub bzip2_decompress($fh) {
             }
             elsif ($block_magic eq "\27rE8P\x90") {    # BlockFooter
                 $VERBOSE && say STDERR "Block footer detected";
-                my $stream_crc = bits2int($fh, 32, \$buffer);
-                $VERBOSE && say STDERR "Stream CRC: $stream_crc";
+                my $stored_stream_crc32 = bits2int($fh, 32, \$buffer);
+                $VERBOSE && say STDERR "Stream CRC: $stored_stream_crc32";
+
+                if ($stored_stream_crc32 != $stream_crc32) {
+                    die "Stream CRC32 error: $stored_stream_crc32 (stored) != $stream_crc32 (actual)";
+                }
+
                 $buffer = '';
                 last;
             }
