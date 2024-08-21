@@ -51,6 +51,7 @@ t/bwt_adaptive_arithmetic_symbolic.t
 t/bwt_arithmetic.t
 t/bwt_arithmetic_symbolic.t
 t/bwt_symbolic.t
+t/bzip2.t
 t/fast_lzss.t
 t/lz77.t
 t/lz77_abc_encode.t

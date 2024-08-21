@@ -4,7 +4,10 @@ Revision history for Compression-Util
 
         [ADDITIONS]
 
+        - Added the `crc32()` function.
         - Added the `int2bytes()` and `int2bytes_lsb()` functions.
+        - Added the `bzip2_compress()` and `bzip2_decompress()` functions.
+        - Added the `encode_alphabet_256()` and `encode_alphabet_256()` functions.
 
         [IMPROVEMENTS]
 

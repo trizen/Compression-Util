@@ -24,6 +24,9 @@ use constant INITIAL_FREQ => 1;
 our %EXPORT_TAGS = (
     'all' => [
         qw(
+
+          crc32
+
           read_bit
           read_bit_lsb
 
@@ -62,6 +65,9 @@ our %EXPORT_TAGS = (
           bwt_compress_symbolic
           bwt_decompress_symbolic
 
+          bzip2_compress
+          bzip2_decompress
+
           mrl_compress
           mrl_decompress
 
@@ -86,6 +92,9 @@ our %EXPORT_TAGS = (
 
           encode_alphabet
           decode_alphabet
+
+          encode_alphabet_256
+          decode_alphabet_256
 
           deltas
           accumulate
@@ -272,11 +281,6 @@ sub bytes2int_lsb ($fh, $n) {
 
 sub bits2int ($fh, $size, $buffer) {
 
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $size, $buffer);
-    }
-
     if ($size % 8 == 0 and ($$buffer // '') eq '') {    # optimization
         return bytes2int($fh, $size >> 3);
     }
@@ -289,11 +293,6 @@ sub bits2int ($fh, $size, $buffer) {
 }
 
 sub bits2int_lsb ($fh, $size, $buffer) {
-
-    if (ref($fh) eq '') {
-        open my $fh2, '<:raw', \$fh;
-        return __SUB__->($fh2, $size, $buffer);
-    }
 
     if ($size % 8 == 0 and ($$buffer // '') eq '') {    # optimization
         return bytes2int_lsb($fh, $size >> 3);
@@ -1392,7 +1391,7 @@ sub delta_decode ($fh) {
 # Alphabet encoding (from Bzip2)
 ################################
 
-sub _encode_alphabet_256 ($alphabet) {
+sub encode_alphabet_256 ($alphabet) {
 
     my %table;
     @table{@$alphabet} = ();
@@ -1429,7 +1428,12 @@ sub _encode_alphabet_256 ($alphabet) {
     return $encoded;
 }
 
-sub _decode_alphabet_256 ($fh) {
+sub decode_alphabet_256 ($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
 
     my @alphabet;
     my $l1 = bytes2int($fh, 2);
@@ -1455,7 +1459,7 @@ sub encode_alphabet ($alphabet) {
     if ($max_symbol <= 255) {
 
         my $delta = delta_encode($alphabet);
-        my $enc   = _encode_alphabet_256($alphabet);
+        my $enc   = encode_alphabet_256($alphabet);
 
         if (length($delta) < length($enc)) {
             return (chr(0) . $delta);
@@ -1475,7 +1479,7 @@ sub decode_alphabet ($fh) {
     }
 
     if (ord(getc($fh) // die "error") == 1) {
-        return _decode_alphabet_256($fh);
+        return decode_alphabet_256($fh);
     }
 
     return delta_decode($fh);
@@ -3105,6 +3109,324 @@ sub lzw_decompress ($fh, $dec_method = \&abc_decode) {
     lzw_decode($dec_method->($fh));
 }
 
+###################################
+# CRC-32 Pure Perl implementation
+###################################
+
+sub _create_crc32_table {
+    my @table;
+    for my $i (0 .. 255) {
+        my $k = $i;
+        for (0 .. 7) {
+            if ($k & 1) {
+                $k >>= 1;
+                $k ^= 0xedb88320;
+            }
+            else {
+                $k >>= 1;
+            }
+        }
+        push(@table, $k & 0xffffffff);
+    }
+    return \@table;
+}
+
+sub crc32($str, $crc = 0) {
+    state $crc_table = _create_crc32_table();
+    $crc &= 0xffffffff;
+    $crc ^= 0xffffffff;
+    foreach my $c (unpack("C*", $str)) {
+        $crc = (($crc >> 8) ^ $crc_table->[($crc & 0xff) ^ $c]);
+    }
+    return (($crc & 0xffffffff) ^ 0xffffffff);
+}
+
+#############################
+# Bzip2 compression
+#############################
+
+sub _bzip2_encode_code_lengths($dict) {
+    my @lengths;
+
+    foreach my $symbol (0 .. max(keys %$dict) // 0) {
+        if (exists($dict->{$symbol})) {
+            push @lengths, length($dict->{$symbol});
+        }
+        else {
+            die "Incomplete Huffman tree not supported";
+            push @lengths, 0;
+        }
+    }
+
+    my $deltas = deltas(\@lengths);
+
+    $VERBOSE && say STDERR "Code lengths: (@lengths)";
+    $VERBOSE && say STDERR "Code lengths deltas: (@$deltas)";
+
+    my $bitstring = int2bits(shift(@$deltas), 5) . '0';
+
+    foreach my $d (@$deltas) {
+        $bitstring .= (($d > 0) ? ('10' x $d) : ('11' x abs($d))) . '0';
+    }
+
+    $VERBOSE && say STDERR "Deltas bitstring: $bitstring";
+
+    return $bitstring;
+}
+
+sub bzip2_compress($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    my $level      = 1;
+    my $CHUNK_SIZE = 100_000 * $level;
+
+    my $compressed .= "BZh" . $level;
+
+    state $block_header_bitstring = unpack("B48", "1AY&SY");
+    state $block_footer_bitstring = unpack("B48", "\27rE8P\x90");
+
+    my $bitstring    = '';
+    my $stream_crc32 = 0;
+
+    while (!eof($fh)) {
+
+        read($fh, (my $chunk), $CHUNK_SIZE) || last;
+
+        $bitstring .= $block_header_bitstring;
+
+        my $crc32 = crc32(pack('b*', unpack('B*', $chunk)));
+        $VERBOSE && say STDERR "CRC32: $crc32";
+
+        $crc32 = oct('0b' . int2bits_lsb($crc32, 32)) & 0xffffffff;
+        $VERBOSE && say STDERR "Bzip2-CRC32: $crc32";
+
+        # FIXME: there is a bug in the computation of stream_crc32?
+        $stream_crc32 = ($crc32 ^ (0xffffffff & (($stream_crc32 << 1) | ($stream_crc32 >> 31))));
+
+        $bitstring .= int2bits($crc32, 32);
+        $bitstring .= '0';                    # not randomized
+
+        my $rle4 = rle4_encode($chunk);
+        my ($bwt, $bwt_idx) = bwt_encode(symbols2string($rle4));
+
+        $bitstring .= int2bits($bwt_idx, 24);
+
+        my ($mtf, $alphabet) = mtf_encode($bwt);
+        $VERBOSE && say STDERR "Alphabet: (@$alphabet)";
+
+        $bitstring .= unpack('B*', encode_alphabet_256($alphabet));
+
+        my @zrle = reverse @{zrle_encode([reverse @$mtf])};
+
+        my $eob = scalar(@$alphabet) + 1;    # end-of-block symbol
+        $VERBOSE && say STDERR "EOB symbol: $eob";
+        push @zrle, $eob;
+
+        my ($dict) = huffman_from_symbols([@zrle, 0 .. $eob - 1]);
+        my $num_sels = int(sprintf('%.0f', 0.5 + (scalar(@zrle) / 50)));    # ceil(|zrle| / 50)
+        $VERBOSE && say STDERR "Number of selectors: $num_sels";
+
+        $bitstring .= int2bits(2,         3);
+        $bitstring .= int2bits($num_sels, 15);
+        $bitstring .= '0' x $num_sels;
+
+        $bitstring .= _bzip2_encode_code_lengths($dict) x 2;
+        $bitstring .= join('', @{$dict}{@zrle});
+
+        $compressed .= pack('B*', substr($bitstring, 0, length($bitstring) - (length($bitstring) % 8), ''));
+    }
+
+    $bitstring  .= $block_footer_bitstring;
+    $bitstring  .= int2bits($stream_crc32, 32);
+    $compressed .= pack('B*', $bitstring);
+
+    return $compressed;
+}
+
+#################################
+# Bzip2 decompression
+#################################
+
+sub bzip2_decompress($fh) {
+
+    if (ref($fh) eq '') {
+        open my $fh2, '<:raw', \$fh;
+        return __SUB__->($fh2);
+    }
+
+    state $MaxHuffmanBits = 20;
+    my $decompressed = '';
+
+    while (!eof($fh)) {
+
+        my $buffer = '';
+
+        (bytes2int($fh, 2) == 0x425a and getc($fh) eq 'h')
+          or die "Not a valid Bzip2 archive";
+
+        my $level = getc($fh);
+
+        if ($level !~ /^[1-9]\z/) {
+            die "Invalid level: $level";
+        }
+
+        $VERBOSE && say STDERR "Compression level: $level";
+
+        while (!eof($fh)) {
+
+            my $block_magic = pack "B48", join('', map { read_bit($fh, \$buffer) } 1 .. 48);
+
+            if ($block_magic eq "1AY&SY") {    # BlockHeader
+                $VERBOSE && say STDERR "Block header detected";
+
+                my $crc32 = bits2int($fh, 32, \$buffer);
+                $VERBOSE && say STDERR "CRC32 = $crc32";
+
+                my $randomized = read_bit($fh, \$buffer);
+                $randomized == 0 or die "randomized not supported";
+
+                my $bwt_idx = bits2int($fh, 24, \$buffer);
+                $VERBOSE && say STDERR "BWT index: $bwt_idx";
+
+                my @alphabet;
+                my $l1 = bits2int($fh, 16, \$buffer);
+                for my $i (0 .. 15) {
+                    if ($l1 & (0x8000 >> $i)) {
+                        my $l2 = bits2int($fh, 16, \$buffer);
+                        for my $j (0 .. 15) {
+                            if ($l2 & (0x8000 >> $j)) {
+                                push @alphabet, 16 * $i + $j;
+                            }
+                        }
+                    }
+                }
+
+                $VERBOSE && say STDERR "MTF alphabet: (@alphabet)";
+
+                my $num_trees = bits2int($fh, 3, \$buffer);
+                $VERBOSE && say STDERR "Number or trees: $num_trees";
+
+                my $num_sels = bits2int($fh, 15, \$buffer);
+                $VERBOSE && say STDERR "Number of selectors: $num_sels";
+
+                my @idxs;
+                for (1 .. $num_sels) {
+                    my $i = 0;
+                    while (read_bit($fh, \$buffer)) {
+                        $i += 1;
+                        ($i < $num_trees) or die "error";
+                    }
+                    push @idxs, $i;
+                }
+
+                my $sels = mtf_decode(\@idxs, [0 .. $num_trees - 1]);
+                $VERBOSE && say STDERR "Selectors: (@$sels)";
+
+                my $num_syms = scalar(@alphabet) + 2;
+
+                my @trees;
+                for (1 .. $num_trees) {
+                    my @clens;
+                    my $clen = bits2int($fh, 5, \$buffer);
+                    for (1 .. $num_syms) {
+                        while (1) {
+
+                            ($clen > 0 and $clen <= $MaxHuffmanBits) or die "error";
+
+                            if (not read_bit($fh, \$buffer)) {
+                                last;
+                            }
+
+                            $clen -= read_bit($fh, \$buffer) ? 1 : -1;
+                        }
+
+                        push @clens, $clen;
+                    }
+                    push @trees, \@clens;
+                    $VERBOSE && say STDERR "Code lengths: (@clens)";
+                }
+
+                foreach my $tree (@trees) {
+                    my $maxLen = max(@$tree);
+                    my $sum    = 1 << $maxLen;
+                    for my $clen (@$tree) {
+                        $sum -= (1 << $maxLen) >> $clen;
+                    }
+                    $sum == 0 or die "incomplete tree not supported: (@$tree)";
+                }
+
+                my @huffman_trees = map { (huffman_from_code_lengths($_))[1] } @trees;
+
+                my $eob = @alphabet + 1;
+
+                my @zrle;
+                my $code = '';
+
+                my $sel_idx = 0;
+                my $tree    = $huffman_trees[$sels->[$sel_idx]];
+                my $decoded = 50;
+
+                while (!eof($fh)) {
+                    $code .= read_bit($fh, \$buffer);
+
+                    if (length($code) > $MaxHuffmanBits) {
+                        die "[!] Something went wrong: length of code `$code` is > $MaxHuffmanBits.\n";
+                    }
+
+                    if (exists($tree->{$code})) {
+
+                        my $sym = $tree->{$code};
+
+                        if ($sym == $eob) {    # end of block marker
+                            $VERBOSE && say STDERR "EOB detected: $sym";
+                            last;
+                        }
+
+                        push @zrle, $sym;
+                        $code = '';
+
+                        if (--$decoded <= 0) {
+                            if (++$sel_idx <= $#$sels) {
+                                $tree = $huffman_trees[$sels->[$sel_idx]];
+                            }
+                            else {
+                                die "No more selectors";    # should not happen
+                            }
+                            $decoded = 50;
+                        }
+                    }
+                }
+
+                my @mtf = reverse @{zrle_decode([reverse @zrle])};
+                my $bwt = symbols2string mtf_decode(\@mtf, \@alphabet);
+
+                my $rle4 = string2symbols bwt_decode($bwt, $bwt_idx);
+                my $data = rle4_decode($rle4);
+
+                $decompressed .= symbols2string($data);
+            }
+            elsif ($block_magic eq "\27rE8P\x90") {    # BlockFooter
+                $VERBOSE && say STDERR "Block footer detected";
+                my $stream_crc = bits2int($fh, 32, \$buffer);
+                $VERBOSE && say STDERR "Stream CRC: $stream_crc";
+                $buffer = '';
+                last;
+            }
+            else {
+                die "Unknown block magic: $block_magic";
+            }
+        }
+
+        $VERBOSE && say STDERR "End of container";
+    }
+
+    return $decompressed;
+}
+
 1;
 
 __END__
@@ -3291,6 +3613,9 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       bwt_compress_symbolic(\@symbols)     # Symbolic Bzip2-like compression (RLE4+sBWT+MTF+ZRLE+Huffman coding)
       bwt_decompress_symbolic($fh)         # Inverse of the above method
 
+      bzip2_compress($string)              # Compress a given string using the Bzip2 format
+      bzip2_decompress($fh)                # Inverse of the above method
+
       lzss_compress($string)               # LZSS + DEFLATE-like encoding of lengths and distances
       lzss_decompress($fh)                 # Inverse of the above method
 
@@ -3344,6 +3669,9 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       encode_alphabet(\@alphabet)          # Encode an alphabet of symbols into a binary string
       decode_alphabet($fh)                 # Inverse of the above method
 
+      encode_alphabet_256(\@alphabet)      # Encode an alphabet of symbols (limited to [0..255]) into a binary string
+      decode_alphabet_256($fh)             # Inverse of the above method
+
       frequencies(\@symbols)               # Returns a dictionary with symbol frequencies
       run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array-ref
 
@@ -3363,6 +3691,8 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       lzw_decode(\@symbols)                # Inverse of the above method
 
 =head1 LOW-LEVEL FUNCTIONS
+
+      crc32($string, $prev_crc = 0)        # Compute the CRC32 value of a given string
 
       read_bit($fh, \$buffer)              # Read one bit from file-handle (MSB)
       read_bit_lsb($fh, \$buffer)          # Read one bit from file-handle (LSB)
@@ -3615,6 +3945,20 @@ Similar to C<bwt_compress()>, except that it accepts an arbitrary array-ref of n
 
 Inverse of C<bwt_compress_symbolic()>.
 
+=head2 bzip2_compress
+
+    my $string = bzip2_compress($data);
+    my $string = bzip2_compress($fh);
+
+Valid Bzip2 compressor, given a string or an input file-handle.
+
+=head2 bzip2_decompress
+
+    my $data = bzip2_decompress($string);
+    my $data = bzip2_decompress($fh);
+
+Valid Bzip2 decompressor, given a string or an input file-handle.
+
 =head2 mrl_compress / mrl_compress_symbolic
 
     # Does Huffman coding
@@ -3824,16 +4168,20 @@ Optionally, the alphabet can be provided as a second argument. When two argument
 
 Inverse of C<mtf_encode()>.
 
-=head2 encode_alphabet
+=head2 encode_alphabet / encode_alphabet_256
 
-    my $string = encode_alphabet(\@alphabet);
+    my $string = encode_alphabet(\@alphabet);        # supports arbitrarily large symbols
+    my $string = encode_alphabet_256(\@alphabet);    # limited to symbols [0..255]
 
-Encodes an alphabet of symbols into a binary string.
+Encode a sorted alphabet of symbols into a binary string.
 
-=head2 decode_alphabet
+=head2 decode_alphabet / decode_alphabet_256
 
     my $alphabet = decode_alphabet($fh);
     my $alphabet = decode_alphabet($string);
+
+    my $alphabet = decode_alphabet_256($fh);
+    my $alphabet = decode_alphabet_256($string);
 
 Decodes an encoded alphabet, given a file-handle or a binary string, returning an array-ref of symbols. Inverse of C<encode_alphabet()>.
 
@@ -3948,6 +4296,13 @@ Performs Lempel-Ziv-Welch (LZW) decoding on the provided symbols. Inverse of C<l
 The function returns the decoded string.
 
 =head1 INTERFACE FOR LOW-LEVEL FUNCTIONS
+
+=head2 crc32
+
+    my $int32 = crc32($data);
+    my $int32 = crc32($data, $prev_crc32);
+
+Compute the CRC32 of a given string.
 
 =head2 read_bit
 
