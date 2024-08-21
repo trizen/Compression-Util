@@ -3406,8 +3406,17 @@ sub bzip2_decompress($fh) {
 
                 my $rle4 = string2symbols bwt_decode($bwt, $bwt_idx);
                 my $data = rle4_decode($rle4);
+                my $dec  = symbols2string($data);
 
-                $decompressed .= symbols2string($data);
+                my $new_crc32 = oct('0b' . int2bits_lsb(crc32(pack('b*', unpack('B*', $dec))), 32));
+
+                $VERBOSE && say STDERR "Computed CRC32: $new_crc32";
+
+                if ($crc32 != $new_crc32) {
+                    die "CRC32 error: $crc32 (stored) != $new_crc32 (actual)";
+                }
+
+                $decompressed .= $dec;
             }
             elsif ($block_magic eq "\27rE8P\x90") {    # BlockFooter
                 $VERBOSE && say STDERR "Block footer detected";
