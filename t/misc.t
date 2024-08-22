@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 673;
+plan tests => 715;
 
 ##################################
 
@@ -74,6 +74,8 @@ foreach my $str (
     test_array(string2symbols($str));
 
     is(bzip2_decompress(bzip2_compress($str)),                                           $str);
+    is(gzip_decompress(gzip_compress($str)),                                             $str);
+    is(gzip_decompress(gzip_compress($str, \&lzss_encode_fast)),                         $str);
     is(lzb_decompress(lzb_compress($str)),                                               $str);
     is(lzb_decompress(lzb_compress($str, \&lzss_encode_fast)),                           $str);
     is(lz77_decompress(lz77_compress($str)),                                             $str);
@@ -382,10 +384,21 @@ is_deeply(lzss_decompress_symbolic(lzss_compress_symbolic([])),  []);
 ################################################
 
 is(bzip2_decompress("BZh91AY&SY\xEA\xE0\x8D\xEB\0\0\0\xC1\0\0\x100\0 \0!\x98\31\x84aw\$S\x85\t\16\xAE\b\xDE\xB0"), "ab\n");
+
 is(
     bzip2_decompress("BZh91AY&SY\x99\xAC\"V\0\0\2W\x80\0\20`\4\0@\0\x80\6\4\x90\0 \0\"\6" . "\x81\x90\x80i\xA6\x89\30j\xCE\xA4\31o\x8B\xB9\"\x9C(HL\xD6\21+\0"),
     "Hello, World!\n"
   );
+
+is(
+    bzip2_decompress(
+                         "BZh91AY&SY\xEA\xE0\x8D\xEB\0\0\0\xC1\0\0\x100\0 \0!\x98\31\x84aw\$S\x85\t\16\xAE\b\xDE\xB0"
+                       . "BZh91AY&SY\x99\xAC\"V\0\0\2W\x80\0\20`\4\0@\0\x80\6\4\x90\0 \0\"\6"
+                       . "\x81\x90\x80i\xA6\x89\30j\xCE\xA4\31o\x8B\xB9\"\x9C(HL\xD6\21+\0"
+                    ),
+    "ab\nHello, World!\n"
+  );
+
 is(
     bzip2_decompress(
                          "BZh91AY&SY\xE9\xA6L\xBE\0\0\20\xC9\x80\n\20\2\xE0?\xFB\x8B0"
@@ -399,3 +412,63 @@ is(
       . "b998899987ababaababababczzzczvzczvzvzvzvzvzvzvzvzvzvzvzvzvzvzvzkdkdkdjdkdjdjdjdkdkdkdkdkdkdkdj"
       . "dkdkdjdjdkdjdjdjdjdjdkdmumuishdjdhdhdksjgsyshfbjcidbdbyhebdkjgsbshyehdbididhsbdjodhhdnkduf5\n"
   );
+
+################################################
+
+is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3\1\31\0\xE6\xFFTOBEORNOTTOBEORTOBEORNOT\nW\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
+
+is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3\13\xF1wr\xF5\17\xF2\xF3\17\x810\xE0\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
+
+is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3\13\xF1wr\xF5\17\xF2\xF3\17\t\xF1wr\xF5\17\n\xF1wr\xF5\17\xF2\xF3\17\xE1\2\0W\xF9@\xF8\31\0\0\0"),
+    "TOBEORNOTTOBEORTOBEORNOT\n");
+
+is(
+    gzip_decompress(
+"\37\x8B\b\0\0\0\0\0\0\3=\xC7\1\f\0\0\b\x82\xB0m\xDB\xB6\xADm\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xD6\xD6\xB6m[l\xCDm\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6mmss\xDB\xB6_\xF4p\x8B\x8C\xB4\36W\xF9@\xF8\31\0\0\0"
+    ),
+    "TOBEORNOTTOBEORTOBEORNOT\n"
+  );
+
+is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3=\xC7\xB1\t\0\0\b\3\xC1\xDE\xB1\4[\37\$\xFB\xCFb\21Hw'z\xB8EFZ\17W\xF9@\xF8\31\0\0\0"),
+    "TOBEORNOTTOBEORTOBEORNOT\n");
+
+is(gzip_decompress("\37\x8B\b\0?\xD5\xC6f\0\3\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
+
+is(gzip_decompress("\37\x8B\b\b\5\xD1\xC6f\0\3/tmp/test.txt\0\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
+
+is(gzip_decompress("\37\x8B\b\bY\xD6\xC6f\0\3test.txt\0\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
+
+is(gzip_decompress("\37\x8B\b\0Y\xD6\xC6f\0\3\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
+
+is(gzip_decompress("\37\x8B\b\0Y\xD6\xC6f\2\3\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
+
+is(
+    gzip_decompress(
+"\37\x8B\b\0\0\0\0\0\0\3\5\x80\1\f\0 \b\xC2\xB6m\xDB\xB6\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\e\e\xDB\xB6m~c\xDF\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xB6m\xDB\xD6\$e\x87\x922I\xD9\xE1\xFBW\xF9@\xF8\31\0\0\0"
+    ),
+    "TOBEORNOTTOBEORTOBEORNOT\n"
+  );
+
+{
+
+    my $data = do {
+        open my $fh, '<:raw', __FILE__;
+        local $/;
+        <$fh>;
+    };
+
+    is(gzip_decompress(gzip_compress($data)),                                             $data);
+    is(gzip_decompress(gzip_compress($data, \&lzss_encode_fast)),                         $data);
+    is(bzip2_decompress(bzip2_compress($data)),                                           $data);
+    is(lzss_decompress(lzss_compress($data)),                                             $data);
+    is(lzss_decompress(lzss_compress($data, \&create_huffman_entry, \&lzss_encode_fast)), $data);
+    is(lzb_decompress(lzb_compress($data)),                                               $data);
+    is(lzb_decompress(lzb_compress($data, \&lzss_encode_fast)),                           $data);
+    is(bwt_decompress(bwt_compress($data)),                                               $data);
+    is(mrl_decompress(mrl_compress($data)),                                               $data);
+    is(lz77_decompress(lz77_compress($data)),                                             $data);
+    is(lz77_decompress(lz77_compress($data, \&create_huffman_entry, \&lzss_encode_fast)), $data);
+    is(lzw_decompress(lzw_compress($data)),                                               $data);
+}
+
+###################################################

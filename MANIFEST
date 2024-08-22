@@ -8,11 +8,14 @@ examples/bwt_adaptive_ac_string_symbolic.pl
 examples/bwt_string.pl
 examples/bwt_string_symbolic.pl
 examples/bwt_symbolic.pl
+examples/bzip2_compressor.pl
+examples/bzip2_decompressor.pl
 examples/fast_lzss.pl
 examples/fast_lzss_string.pl
 examples/gzip_block_type_1.pl
 examples/gzip_block_type_2.pl
 examples/gzip_decompressor.pl
+examples/gzip_file_compression.pl
 examples/lz77.pl
 examples/lz77_ac_string.pl
 examples/lz77_adaptive_ac_string.pl
@@ -53,6 +56,7 @@ t/bwt_arithmetic_symbolic.t
 t/bwt_symbolic.t
 t/bzip2.t
 t/fast_lzss.t
+t/gzip.t
 t/lz77.t
 t/lz77_abc_encode.t
 t/lz77_adaptive_arithmetic.t
