@@ -8,7 +8,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 our $VERBOSE = 0;        # verbose mode
 
 our $LZ_MIN_LEN       = 4;          # minimum match length in LZ parsing
@@ -212,7 +212,7 @@ sub read_bit_lsb ($fh, $bitstring) {
 
 sub read_bits ($fh, $bits_len) {
 
-    read($fh, (my $data), $bits_len >> 3);
+    read($fh, (my $data), $bits_len >> 3) // die "Read error: $!";
     $data = unpack('B*', $data);
 
     while (length($data) < $bits_len) {
@@ -228,7 +228,7 @@ sub read_bits ($fh, $bits_len) {
 
 sub read_bits_lsb ($fh, $bits_len) {
 
-    read($fh, (my $data), $bits_len >> 3);
+    read($fh, (my $data), $bits_len >> 3) // die "Read error: $!";
     $data = unpack('b*', $data);
 
     while (length($data) < $bits_len) {
@@ -2632,11 +2632,11 @@ sub lzss_encode_fast($str) {
 # LZ77 encoding, inspired by LZ4
 ################################
 
-sub lz77_encode($chunk, $lzss_encode_sub = \&lzss_encode) {
+sub lz77_encode($chunk, $lzss_encoding_sub = \&lzss_encode) {
 
     local $LZ_MAX_LEN = ~0;    # maximum match length
 
-    my ($literals, $distances, $lengths) = $lzss_encode_sub->($chunk);
+    my ($literals, $distances, $lengths) = $lzss_encoding_sub->($chunk);
 
     my $literals_end = $#{$literals};
     my (@symbols, @len_symbols, @match_symbols, @dist_symbols);
@@ -2925,7 +2925,8 @@ sub lzb_decompress($fh) {
     my $search_window_size = 1 << 16;
 
     my $block_size = fibonacci_decode($fh)->[0] // die "decompression error";
-    read($fh, (my $block), $block_size);
+
+    read($fh, (my $block), $block_size) // die "Read error: $!";
 
     while ($block ne '') {
 
@@ -3187,7 +3188,7 @@ sub bzip2_compress($fh) {
     my $level = 1;
 
     # There is a CRC32 issue on some (binary) inputs, when using large chunk sizes
-    ##my $CHUNK_SIZE = 100_000 * $level;
+    ## my $CHUNK_SIZE = 100_000 * $level;
     my $CHUNK_SIZE = 1 << 16;
 
     my $compressed .= "BZh" . $level;
@@ -3198,19 +3199,18 @@ sub bzip2_compress($fh) {
     my $bitstring    = '';
     my $stream_crc32 = 0;
 
-    while (!eof($fh)) {
-
-        read($fh, (my $chunk), $CHUNK_SIZE) || last;
+    while (read($fh, (my $chunk), $CHUNK_SIZE)) {
 
         $bitstring .= $block_header_bitstring;
 
+        # FIXME: there may be a bug in the computation of crc32
         my $crc32 = crc32(pack('b*', unpack('B*', $chunk)));
         $VERBOSE && say STDERR "CRC32: $crc32";
 
         $crc32 = oct('0b' . int2bits_lsb($crc32, 32));
         $VERBOSE && say STDERR "Bzip2-CRC32: $crc32";
 
-        # FIXME: there is a bug in the computation of stream_crc32
+        # FIXME: there may be a bug in the computation of stream_crc32
         $stream_crc32 = ($crc32 ^ (0xffffffff & (($stream_crc32 << 1) | ($stream_crc32 >> 31))));
 
         $bitstring .= int2bits($crc32, 32);
@@ -3563,7 +3563,8 @@ sub _create_cl_dictionary (@cl_symbols) {
 
 sub _create_block_type_2 ($literals, $distances, $lengths) {
 
-    my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables();
+    state $deflate_tables = [make_deflate_tables()];
+    my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = @$deflate_tables;
 
     my @CL_order = (16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15);
 
@@ -3670,7 +3671,8 @@ sub _create_block_type_2 ($literals, $distances, $lengths) {
 
 sub _create_block_type_1 ($literals, $distances, $lengths) {
 
-    my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables();
+    state $deflate_tables = [make_deflate_tables()];
+    my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = @$deflate_tables;
 
     state $dict;
     state $dist_dict;
@@ -3738,7 +3740,7 @@ sub _create_block_type_0($chunk) {
     $len . $nlen;
 }
 
-sub gzip_compress ($in_fh, $lzss_encode = \&lzss_encode) {
+sub gzip_compress ($in_fh, $lzss_encoding_sub = \&lzss_encode) {
 
     if (ref($in_fh) eq '') {
         open my $fh2, '<:raw', \$in_fh;
@@ -3779,7 +3781,7 @@ sub gzip_compress ($in_fh, $lzss_encode = \&lzss_encode) {
         $crc32 = crc32($chunk, $crc32);
         $total_length += length($chunk);
 
-        my ($literals, $distances, $lengths) = $lzss_encode->($chunk);
+        my ($literals, $distances, $lengths) = $lzss_encoding_sub->($chunk);
 
         $bitstring .= eof($in_fh) ? '1' : '0';
 
@@ -3842,13 +3844,14 @@ sub _extract_block_type_0 ($in_fh, $buffer) {
         $VERBOSE && print STDERR ":: Chunk length: $len\n";
     }
 
-    read($in_fh, (my $chunk), $len);
+    read($in_fh, (my $chunk), $len) // die "Read error: $!";
     return $chunk;
 }
 
 sub _deflate_decode_huffman($in_fh, $buffer, $rev_dict, $dist_rev_dict, $search_window) {
 
-    my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = make_deflate_tables();
+    state $deflate_tables = [make_deflate_tables()];
+    my ($DISTANCE_SYMBOLS, $LENGTH_SYMBOLS, $LENGTH_INDICES) = @$deflate_tables;
 
     my $data = '';
     my $code = '';
