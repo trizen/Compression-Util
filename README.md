@@ -42,9 +42,11 @@ $opts{d} ? decompress(\*STDIN, \*STDOUT) : compress(\*STDIN, \*STDOUT);
     * Fibonacci coding
     * Elias gamma/omega coding
     * Delta coding
-    * Bzip2-like compression
+    * BWT-based compression
     * LZ77/LZSS compression
     * LZW compression
+    * Bzip2 (de)compression
+    * Gzip (de)compression
 
 The provided techniques can be easily combined in various ways to create powerful compressors, such as the Bzip2 compressor, which is a pipeline of the following methods:
 
@@ -54,7 +56,7 @@ The provided techniques can be easily combined in various ways to create powerfu
     4. Zero run-length encoding (ZRLE)
     5. Huffman coding
 
-This functionality is provided by the function `bwt_compress()`, which can be explicitly implemented as:
+A simple BWT-based compression method (similar to Bzip2) is provided by the function `bwt_compress()`, which can be explicitly implemented as:
 
 ```perl
 use 5.036;
@@ -181,11 +183,17 @@ By default, `$LZ_MAX_CHAIN_LEN` is set to `32`.
       mrl_compress_symbolic(\@symbols)     # Symbolic MRL compression (MTF+ZRLE+RLE4+Huffman coding)
       mrl_decompress_symbolic($fh)         # Inverse of the above method
 
-      bwt_compress($string)                # Bzip2-like compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
+      bwt_compress($string)                # BWT-based compression (RLE4+BWT+MTF+ZRLE+Huffman coding)
       bwt_decompress($fh)                  # Inverse of the above method
 
-      bwt_compress_symbolic(\@symbols)     # Symbolic Bzip2-like compression (RLE4+sBWT+MTF+ZRLE+Huffman coding)
+      bwt_compress_symbolic(\@symbols)     # Symbolic BWT-based compression (RLE4+sBWT+MTF+ZRLE+Huffman coding)
       bwt_decompress_symbolic($fh)         # Inverse of the above method
+
+      bzip2_compress($string)              # Compress a given string using the Bzip2 format
+      bzip2_decompress($fh)                # Inverse of the above method
+
+      gzip_compress($string)               # Compress a given string using the Gzip format
+      gzip_decompress($fh)                 # Inverse of the above method
 
       lzss_compress($string)               # LZSS + DEFLATE-like encoding of lengths and distances
       lzss_decompress($fh)                 # Inverse of the above method
@@ -242,6 +250,9 @@ By default, `$LZ_MAX_CHAIN_LEN` is set to `32`.
       encode_alphabet(\@alphabet)          # Encode an alphabet of symbols into a binary string
       decode_alphabet($fh)                 # Inverse of the above method
 
+      encode_alphabet_256(\@alphabet)      # Encode an alphabet of symbols (limited to [0..255]) into a binary string
+      decode_alphabet_256($fh)             # Inverse of the above method
+
       frequencies(\@symbols)               # Returns a dictionary with symbol frequencies
       run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array-ref
 
@@ -264,6 +275,8 @@ By default, `$LZ_MAX_CHAIN_LEN` is set to `32`.
 # LOW-LEVEL FUNCTIONS
 
 ```perl
+      crc32($string, $prev_crc = 0)        # Compute the CRC32 value of a given string
+
       read_bit($fh, \$buffer)              # Read one bit from file-handle (MSB)
       read_bit_lsb($fh, \$buffer)          # Read one bit from file-handle (LSB)
 
@@ -278,6 +291,9 @@ By default, `$LZ_MAX_CHAIN_LEN` is set to `32`.
 
       bytes2int($fh, $n)                   # Read `$n` bytes from file-handle as an integer (MSB)
       bytes2int_lsb($fh, $n)               # Read `$n` bytes from file-handle as an integer (LSB)
+
+      int2bytes($symbol, $size)            # Convert an integer into `$size` bytes. (MSB)
+      int2bytes_lsb($symbol, $size)        # Convert an integer into `$size` bytes. (LSB)
 
       string2symbols($string)              # Returns an array-ref of code points
       symbols2string(\@symbols)            # Returns a string, given an array-ref of code points
@@ -501,7 +517,7 @@ Performs Lempel-Ziv-Welch (LZW) decompression on the provided string or file-han
     my $string = bwt_compress($data, \&create_ac_entry);
 ```
 
-High-level function that performs Bzip2-like compression on the provided data, using the pipeline:
+High-level function that performs BWT-based compression on the provided data, using the pipeline:
 
     1. rle4_encode
     2. bwt_encode
@@ -548,6 +564,43 @@ Similar to `bwt_compress()`, except that it accepts an arbitrary array-ref of no
 ```
 
 Inverse of `bwt_compress_symbolic()`.
+
+## bzip2\_compress
+
+```perl
+    my $string = bzip2_compress($data);
+    my $string = bzip2_compress($fh);
+```
+
+Valid Bzip2 compressor, given a string or an input file-handle.
+
+## bzip2\_decompress
+
+```perl
+    my $data = bzip2_decompress($string);
+    my $data = bzip2_decompress($fh);
+```
+
+Valid Bzip2 decompressor, given a string or an input file-handle.
+
+## gzip\_compress
+
+```perl
+    my $string = gzip_compress($fh);
+    my $string = gzip_compress($data);
+    my $string = gzip_compress($data, \&lzss_encode_fast);  # using fast LZ-parsing
+```
+
+Valid Gzip compressor, given a string or an input file-handle.
+
+## gzip\_decompress
+
+```perl
+    my $data = gzip_decompress($string);
+    my $data = gzip_decompress($fh);
+```
+
+Valid Bzip2 decompressor, given a string or an input file-handle.
 
 ## mrl\_compress / mrl\_compress\_symbolic
 
@@ -804,19 +857,23 @@ Optionally, the alphabet can be provided as a second argument. When two argument
 
 Inverse of `mtf_encode()`.
 
-## encode\_alphabet
+## encode\_alphabet / encode\_alphabet\_256
 
 ```perl
-    my $string = encode_alphabet(\@alphabet);
+    my $string = encode_alphabet(\@alphabet);        # supports arbitrarily large symbols
+    my $string = encode_alphabet_256(\@alphabet);    # limited to symbols [0..255]
 ```
 
-Encodes an alphabet of symbols into a binary string.
+Encode a sorted alphabet of symbols into a binary string.
 
-## decode\_alphabet
+## decode\_alphabet / decode\_alphabet\_256
 
 ```perl
     my $alphabet = decode_alphabet($fh);
     my $alphabet = decode_alphabet($string);
+
+    my $alphabet = decode_alphabet_256($fh);
+    my $alphabet = decode_alphabet_256($string);
 ```
 
 Decodes an encoded alphabet, given a file-handle or a binary string, returning an array-ref of symbols. Inverse of `encode_alphabet()`.
@@ -957,6 +1014,15 @@ The function returns the decoded string.
 
 # INTERFACE FOR LOW-LEVEL FUNCTIONS
 
+## crc32
+
+```perl
+    my $int32 = crc32($data);
+    my $int32 = crc32($data, $prev_crc32);
+```
+
+Compute the CRC32 of a given string.
+
 ## read\_bit
 
 ```perl
@@ -1009,23 +1075,39 @@ Convert a non-negative integer to a bitstring of width `$size`, in MSB order.
 
 Convert a non-negative integer to a bitstring of width `$size`, in LSB order.
 
+## int2bytes
+
+```perl
+    my $string = int2bytes($symbol, $size);
+```
+
+Convert a non-negative integer to a byte-string of width `$size`, in MSB order.
+
+## int2bytes\_lsb
+
+```perl
+    my $string = int2bytes_lsb($symbol, $size);
+```
+
+Convert a non-negative integer to a byte-string of width `$size`, in LSB order.
+
 ## bits2int
 
 ```perl
-    my $integer = bits2int($fh, $size, \$buffer)
+    my $integer = bits2int($fh, $size, \$buffer);
 ```
 
-Read `$size` bits from file-handle `$fh` and convert them to an integer, in MSB order. Inverse of `int2bits()`.
+Read `$size` bits from a file-handle `$fh` and convert them to an integer, in MSB order. Inverse of `int2bits()`.
 
 The function stores the extra bits inside the `$buffer`, reading one character at a time from the file-handle.
 
 ## bits2int\_lsb
 
 ```perl
-    my $integer = bits2int_lsb($fh, $size, \$buffer)
+    my $integer = bits2int_lsb($fh, $size, \$buffer);
 ```
 
-Read `$size` bits from file-handle `$fh` and convert them to an integer, in LSB order. Inverse of `int2bits_lsb()`.
+Read `$size` bits from a file-handle `$fh` and convert them to an integer, in LSB order. Inverse of `int2bits_lsb()`.
 
 The function stores the extra bits inside the `$buffer`, reading one character at a time from the file-handle.
 
@@ -1033,17 +1115,19 @@ The function stores the extra bits inside the `$buffer`, reading one character a
 
 ```perl
     my $integer = bytes2int($fh, $n);
+    my $integer = bytes2int($str, $n);
 ```
 
-Read `$n` bytes from file-handle `$fh` and convert them to an integer, in MSB order.
+Read `$n` bytes from a file-handle `$fh` or from a string `$str` and convert them to an integer, in MSB order.
 
 ## bytes2int\_lsb
 
 ```perl
     my $integer = bytes2int_lsb($fh, $n);
+    my $integer = bytes2int_lsb($str, $n);
 ```
 
-Read `$n` bytes from file-handle `$fh` and convert them to an integer, in LSB order.
+Read `$n` bytes from a file-handle `$fh` or from a string `$str` and convert them to an integer, in LSB order.
 
 ## string2symbols
 
@@ -1377,8 +1461,14 @@ The functions can be combined in various ways, easily creating novel compression
     };
 ```
 
-# SEE ALSO
+# REFERENCES
 
+- DEFLATE Compressed Data Format Specification
+    * [https://datatracker.ietf.org/doc/html/rfc1951](https://datatracker.ietf.org/doc/html/rfc1951)
+- GZIP file format specification
+    * [https://datatracker.ietf.org/doc/html/rfc1952](https://datatracker.ietf.org/doc/html/rfc1952)
+- BZIP2 Format Specification, by Joe Tsai:
+    * [https://github.com/dsnet/compress/blob/master/doc/bzip2-format.pdf](https://github.com/dsnet/compress/blob/master/doc/bzip2-format.pdf)
 - Data Compression (Summer 2023) - Lecture 4 - The Unix 'compress' Program:
     * [https://youtube.com/watch?v=1cJL9Va80Pk](https://youtube.com/watch?v=1cJL9Va80Pk)
 - Data Compression (Summer 2023) - Lecture 5 - Basic Techniques:
@@ -1399,8 +1489,6 @@ The functions can be combined in various ways, easily creating novel compression
     * [https://youtube.com/watch?v=Q2pinaj3i9Y](https://youtube.com/watch?v=Q2pinaj3i9Y)
 - Basic arithmetic coder in C++:
     * [https://github.com/billbird/arith32](https://github.com/billbird/arith32)
-- My blog post on "Lossless Data Compression":
-    * [https://trizenx.blogspot.com/2023/09/lossless-data-compression.html](https://trizenx.blogspot.com/2023/09/lossless-data-compression.html)
 
 # REPOSITORY
 
