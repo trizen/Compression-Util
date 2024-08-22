@@ -341,7 +341,7 @@ sub block_type_0($chunk) {
     $len . $nlen;
 }
 
-sub gzip_compress ($in_fh, $out_fh) {
+sub my_gzip_compress ($in_fh, $out_fh) {
 
     print $out_fh $MAGIC, $CM, $FLAGS, $MTIME, $XFLAGS, $OS;
 
@@ -610,7 +610,7 @@ sub extract_block_type_2 ($in_fh, $buffer, $search_window) {
     decode_huffman($in_fh, $buffer, $LL_rev_dict, $dist_rev_dict, $search_window);
 }
 
-sub gzip_decompress ($in_fh, $out_fh) {
+sub my_gzip_decompress ($in_fh, $out_fh) {
 
     my $MAGIC = (getc($in_fh) // die "error") . (getc($in_fh) // die "error");
 
@@ -750,7 +750,7 @@ sub main {
         open my $out_fh, '>:raw', $output
           or die "Can't open file <<$output>> for writing: $!";
 
-        gzip_decompress($in_fh, $out_fh)
+        my_gzip_decompress($in_fh, $out_fh)
           || die "$0: error: decompression failed!\n";
     }
     elsif ($input !~ $ext || (defined($output) && $output =~ $ext)) {
@@ -762,7 +762,7 @@ sub main {
         open my $out_fh, '>:raw', $output
           or die "Can't open file <<$output>> for writing: $!";
 
-        gzip_compress($in_fh, $out_fh)
+        my_gzip_compress($in_fh, $out_fh)
           || die "$0: error: compression failed!\n";
     }
     else {

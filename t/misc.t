@@ -415,9 +415,13 @@ is(
 
 ################################################
 
-is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3\1\31\0\xE6\xFFTOBEORNOTTOBEORTOBEORNOT\nW\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
-
-is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3\13\xF1wr\xF5\17\xF2\xF3\17\x810\xE0\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
+is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3\1\31\0\xE6\xFFTOBEORNOTTOBEORTOBEORNOT\nW\xF9@\xF8\31\0\0\0"),                   "TOBEORNOTTOBEORTOBEORNOT\n");
+is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3\13\xF1wr\xF5\17\xF2\xF3\17\x810\xE0\\.\0W\xF9@\xF8\31\0\0\0"),                   "TOBEORNOTTOBEORTOBEORNOT\n");
+is(gzip_decompress("\37\x8B\b\0?\xD5\xC6f\0\3\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"),                 "TOBEORNOTTOBEORTOBEORNOT\n");
+is(gzip_decompress("\37\x8B\b\b\5\xD1\xC6f\0\3/tmp/test.txt\0\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
+is(gzip_decompress("\37\x8B\b\bY\xD6\xC6f\0\3test.txt\0\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"),       "TOBEORNOTTOBEORTOBEORNOT\n");
+is(gzip_decompress("\37\x8B\b\0Y\xD6\xC6f\0\3\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"),                 "TOBEORNOTTOBEORTOBEORNOT\n");
+is(gzip_decompress("\37\x8B\b\0Y\xD6\xC6f\2\3\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"),                 "TOBEORNOTTOBEORTOBEORNOT\n");
 
 is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3\13\xF1wr\xF5\17\xF2\xF3\17\t\xF1wr\xF5\17\n\xF1wr\xF5\17\xF2\xF3\17\xE1\2\0W\xF9@\xF8\31\0\0\0"),
     "TOBEORNOTTOBEORTOBEORNOT\n");
@@ -431,16 +435,6 @@ is(
 
 is(gzip_decompress("\37\x8B\b\0\0\0\0\0\0\3=\xC7\xB1\t\0\0\b\3\xC1\xDE\xB1\4[\37\$\xFB\xCFb\21Hw'z\xB8EFZ\17W\xF9@\xF8\31\0\0\0"),
     "TOBEORNOTTOBEORTOBEORNOT\n");
-
-is(gzip_decompress("\37\x8B\b\0?\xD5\xC6f\0\3\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
-
-is(gzip_decompress("\37\x8B\b\b\5\xD1\xC6f\0\3/tmp/test.txt\0\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
-
-is(gzip_decompress("\37\x8B\b\bY\xD6\xC6f\0\3test.txt\0\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
-
-is(gzip_decompress("\37\x8B\b\0Y\xD6\xC6f\0\3\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
-
-is(gzip_decompress("\37\x8B\b\0Y\xD6\xC6f\2\3\13\xF1wr\xF5\17\xF2\xF3\17\t\x013B`\\.\0W\xF9@\xF8\31\0\0\0"), "TOBEORNOTTOBEORTOBEORNOT\n");
 
 is(
     gzip_decompress(
