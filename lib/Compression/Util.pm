@@ -1517,12 +1517,20 @@ sub mtf_encode ($symbols, $alphabet = undef) {
         @alphabet_copy   = @alphabet;
     }
 
-    @table[@alphabet] = (0 .. $#alphabet);
+    my $index;
+    my @indices = (0 .. $#alphabet);
 
     foreach my $c (@$symbols) {
-        push @C, (my $index = $table[$c]);
+
+        foreach my $i (@indices) {
+            if ($alphabet[$i] == $c) {
+                $index = $i;
+                last;
+            }
+        }
+
+        push @C, $index;
         unshift(@alphabet, splice(@alphabet, $index, 1));
-        @table[@alphabet[0 .. $index]] = (0 .. $index);
     }
 
     $return_alphabet || return \@C;
@@ -3191,7 +3199,7 @@ sub bzip2_compress($fh) {
     ## my $CHUNK_SIZE = 100_000 * $level;
     my $CHUNK_SIZE = 1 << 16;
 
-    my $compressed .= "BZh" . $level;
+    my $compressed = "BZh" . $level;
 
     state $block_header_bitstring = unpack("B48", "1AY&SY");
     state $block_footer_bitstring = unpack("B48", "\27rE8P\x90");

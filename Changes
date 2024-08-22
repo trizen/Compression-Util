@@ -1,5 +1,11 @@
 Revision history for Compression-Util
 
+0.12    2024-??-??
+
+        [IMPROVEMENTS]
+
+        - Slightly better performance in `mtf_encode()`.
+
 0.11    2024-08-22
 
         [ADDITIONS]
@@ -8,7 +14,7 @@ Revision history for Compression-Util
         - Added the `int2bytes()` and `int2bytes_lsb()` functions.
         - Added the `bzip2_compress()` and `bzip2_decompress()` functions.
         - Added the `gzip_compress()` and `gzip_decompress()` functions.
-        - Added the `encode_alphabet_256()` and `encode_alphabet_256()` functions.
+        - Added the `encode_alphabet_256()` and `decode_alphabet_256()` functions.
 
         [IMPROVEMENTS]
 
