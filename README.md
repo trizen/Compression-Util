@@ -42,12 +42,12 @@ $opts{d} ? decompress(\*STDIN, \*STDOUT) : compress(\*STDIN, \*STDOUT);
     * Fibonacci coding
     * Elias gamma/omega coding
     * Delta coding
-    * BWT-based compression
-    * LZ77/LZSS compression
-    * LZW compression
+    * BWT-based (de)compression
+    * LZ77/LZSS (de)compression
+    * LZW (de)compression
     * Bzip2 (de)compression
     * Gzip (de)compression
-    * LZ4 decompression
+    * LZ4 (de)compression
 
 The provided techniques can be easily combined in various ways to create powerful compressors, such as the Bzip2 compressor, which is a pipeline of the following methods:
 
@@ -214,7 +214,8 @@ By default, `$LZ_MAX_CHAIN_LEN` is set to `32`.
       lzw_compress($string)                # LZW + abc_encode() compression
       lzw_decompress($fh)                  # Inverse of the above method
 
-      lz4_decompress($fh)                  # Decompress LZ4 data
+      lz4_compress($string)                # Compress a given string using the LZ4 frame format
+      lz4_decompress($fh)                  # Inverse of the above method
 ```
 
 # MEDIUM-LEVEL FUNCTIONS
@@ -489,6 +490,18 @@ High-level function that performs byte-oriented LZSS compression, inspired by LZ
 ```
 
 Inverse of `lzb_compress()`.
+
+## lz4\_compress
+
+```perl
+    my $string = lz4_compress($fh);
+    my $string = lz4_compress($data);
+    my $string = lz4_compress($data, \&lzss_encode_fast);   # with fast-LZ parsing
+```
+
+Valid LZ4 compressor, using the LZ4 Frame format, given either a string or an input file-handle.
+
+The input data is split into chunks of length `2**17` and compressed into independent LZ4 blocks.
 
 ## lz4\_decompress
 
@@ -1310,15 +1323,24 @@ Inverse of `lz77_encode()` and `lz77_encode_symbolic()`, respectively.
 
 ```perl
     # Standard version
-    my ($literals, $distances, $lengths) = lzss_encode($data);
-    my ($literals, $distances, $lengths) = lzss_encode(\@symbols);
+    my ($literals, $distances, $lengths) = lzss_encode($data, %params);
+    my ($literals, $distances, $lengths) = lzss_encode(\@symbols, %params);
 
     # Faster version
-    my ($literals, $distances, $lengths) = lzss_encode_fast($data);
-    my ($literals, $distances, $lengths) = lzss_encode_fast(\@symbols);
+    my ($literals, $distances, $lengths) = lzss_encode_fast($data, %params);
+    my ($literals, $distances, $lengths) = lzss_encode_fast(\@symbols, %params);
 ```
 
 Low-level function that applies the LZSS (Lempel-Ziv-Storer-Szymanski) algorithm on the provided data.
+
+The accepted `%params` are:
+
+```perl
+    min_len         => $LZ_MIN_LEN,
+    max_len         => $LZ_MAX_LEN,
+    max_dist        => $LZ_MAX_DIST,
+    max_chain_len   => $LZ_MAX_CHAIN_LEN,
+```
 
 The function returns three values:
 
