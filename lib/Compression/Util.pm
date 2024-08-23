@@ -3762,17 +3762,16 @@ sub gzip_compress ($in_fh, $lzss_encoding_sub = \&lzss_encode) {
 
     open my $out_fh, '>:raw', \$compressed;
 
-    local $Compression::Util::LZ_MIN_LEN       = 4;                # minimum match length in LZ parsing
-    local $Compression::Util::LZ_MAX_LEN       = 258;              # maximum match length in LZ parsing
-    local $Compression::Util::LZ_MAX_DIST      = (1 << 15) - 1;    # maximum allowed back-reference distance in LZ parsing
-    local $Compression::Util::LZ_MAX_CHAIN_LEN = 64;               # how many recent positions to remember in LZ parsing
+    local $Compression::Util::LZ_MIN_LEN  = 4;                # minimum match length in LZ parsing
+    local $Compression::Util::LZ_MAX_LEN  = 258;              # maximum match length in LZ parsing
+    local $Compression::Util::LZ_MAX_DIST = (1 << 15) - 1;    # maximum allowed back-reference distance in LZ parsing
 
-    state $MAGIC  = pack('C*', 0x1f, 0x8b);                        # magic MIME type
-    state $CM     = chr(0x08);                                     # 0x08 = DEFLATE
-    state $FLAGS  = chr(0x00);                                     # flags
-    state $MTIME  = pack('C*', (0x00) x 4);                        # modification time
-    state $XFLAGS = chr(0x00);                                     # extra flags
-    state $OS     = chr(0x03);                                     # 0x03 = Unix
+    state $MAGIC  = pack('C*', 0x1f, 0x8b);                   # magic MIME type
+    state $CM     = chr(0x08);                                # 0x08 = DEFLATE
+    state $FLAGS  = chr(0x00);                                # flags
+    state $MTIME  = pack('C*', (0x00) x 4);                   # modification time
+    state $XFLAGS = chr(0x00);                                # extra flags
+    state $OS     = chr(0x03);                                # 0x03 = Unix
 
     print $out_fh $MAGIC, $CM, $FLAGS, $MTIME, $XFLAGS, $OS;
 
@@ -3781,7 +3780,7 @@ sub gzip_compress ($in_fh, $lzss_encoding_sub = \&lzss_encode) {
 
     my $bitstring = '';
 
-    if (eof($in_fh)) {                                             # empty file
+    if (eof($in_fh)) {                                        # empty file
         $bitstring = '1' . '10' . '0000000';
     }
 
@@ -4057,10 +4056,9 @@ sub gzip_decompress ($in_fh) {
 
     open my $out_fh, '>:raw', \$decompressed;
 
-    local $Compression::Util::LZ_MIN_LEN       = 4;                # minimum match length in LZ parsing
-    local $Compression::Util::LZ_MAX_LEN       = 258;              # maximum match length in LZ parsing
-    local $Compression::Util::LZ_MAX_DIST      = (1 << 15) - 1;    # maximum allowed back-reference distance in LZ parsing
-    local $Compression::Util::LZ_MAX_CHAIN_LEN = 64;               # how many recent positions to remember in LZ parsing
+    local $Compression::Util::LZ_MIN_LEN  = 4;                # minimum match length in LZ parsing
+    local $Compression::Util::LZ_MAX_LEN  = 258;              # maximum match length in LZ parsing
+    local $Compression::Util::LZ_MAX_DIST = (1 << 15) - 1;    # maximum allowed back-reference distance in LZ parsing
 
     my $MAGIC = (getc($in_fh) // confess "error") . (getc($in_fh) // confess "error");
 
