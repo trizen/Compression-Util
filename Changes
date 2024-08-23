@@ -2,9 +2,14 @@ Revision history for Compression-Util
 
 0.12    2024-??-??
 
+        [ADDITIONS]
+
+        - Added the `lz4_decompress()` function.
+
         [IMPROVEMENTS]
 
         - Slightly better performance in `mtf_encode()`.
+        - Replaced all "die" statements, with Carp::confess(), for better debugging.
 
 0.11    2024-08-22
 

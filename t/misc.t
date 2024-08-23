@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 771;
+plan tests => 789;
 
 ##################################
 
@@ -485,6 +485,42 @@ is(
                    ),
     "hi there"
   );
+
+###################################################
+
+is(lz4_decompress("\4\"M\30d\@\xA7\0\0\0\0\5]\xCC\2"),                                               "");
+is(lz4_decompress("\4\"M\30`ps\0\0\0\0"),                                                            "");
+is(lz4_decompress("\4\"M\30d\@\xA7\1\0\0\x80a\0\0\0\0Vt\rU"),                                        "a");
+is(lz4_decompress("\4\"M\30`ps\2\0\0\0\20a\0\0\0\0"),                                                "a");
+is(lz4_decompress("\4\"M\30`ps\b\0\0\x002abc\3\0\20\n\0\0\0\0"),                                     "abcabcabc\n");
+is(lz4_decompress("\4\"M\30d\@\xA7\n\0\0\x80abcabcabc\n\0\0\0\0\xE9j\xA1C"),                         "abcabcabc\n");
+is(lz4_decompress("\4\"M\30`ps\f\0\0\x003abc\3\0\31a\1\0\20\n\0\0\0\0"),                             "abcabcabcaaaaaaaaaaaaaaa\n");
+is(lz4_decompress("\4\"M\30d\@\xA7\17\0\0\x003abc\3\0\6\1\0Paaaa\n\0\0\0\0G}M\xC6"),                 "abcabcabcaaaaaaaaaaaaaaa\n");
+is(lz4_decompress("\4\"M\30`\@\x82\17\0\0\x003abc\3\0\6\1\0Paaaa\n\0\0\0\0"),                        "abcabcabcaaaaaaaaaaaaaaa\n");
+is(lz4_decompress("\4\"M\30p\@\xAD\17\0\0\x003abc\3\0\6\1\0Paaaa\n\xF6\xFE\xFE0\0\0\0\0"),           "abcabcabcaaaaaaaaaaaaaaa\n");
+is(lz4_decompress("\4\"M\30t\@\xBD\17\0\0\x003abc\3\0\5\1\0Paaaaa\a\x8A+\xDD\0\0\0\0\\\13\x81\xFE"), "abcabcabcaaaaaaaaaaaaaaa");
+is(lz4_decompress("\4\"M\30t\@\xBD\26\0\0\0\x92TOBEORNOT\t\0\x90TOBEORNOTb\xC52\32\0\0\0\0\x9Dn#B"), "TOBEORNOTTOBEORTOBEORNOT");
+is(lz4_decompress("\4\"M\30d\@\xA7\26\0\0\0\x92TOBEORNOT\t\0\x90TOBEORNOT\0\0\0\0\x9Dn#B"),          "TOBEORNOTTOBEORTOBEORNOT");
+is(lz4_decompress("\4\"M\30`ps\21\0\0\0\x92TOBEORNOT\t\0\4\17\0\20T\0\0\0\0"),                       "TOBEORNOTTOBEORTOBEORNOT");
+is(lz4_decompress("\4\"M\30`\@\x82\26\0\0\0\x92TOBEORNOT\t\0\x90TOBEORNOT\0\0\0\0"),                 "TOBEORNOTTOBEORTOBEORNOT");
+is(lz4_decompress("\4\"M\30p\@\xAD\26\0\0\0\x92TOBEORNOT\t\0\x90TOBEORNOTb\xC52\32\0\0\0\0"),        "TOBEORNOTTOBEORTOBEORNOT");
+
+is(
+    lz4_decompress("\4\"M\30d\@\xA7\16\0\0\x80Hello, World!\n\0\0\0\0\xE8C\xD0\x9E" . "\4\"M\30d\@\xA7\27\0\0\0\xE5Hello, World! \16\0Prld!\n\0\0\0\0\x9FL\"T"),
+    "Hello, World!\nHello, World! Hello, World!\n"
+  );
+
+is(
+    lz4_decompress(
+                       "\4\"M\30`ps\b\0\0\x002abc\3\0\20\n\0\0\0\0"
+                     . "\4\"M\30d\@\xA7\17\0\0\x003abc\3\0\6\1\0Paaaa\n\0\0\0\0G}M\xC6"
+                     . "\4\"M\30d\@\xA7\26\0\0\0\x92TOBEORNOT\t\0\x90TOBEORNOT\0\0\0\0\x9Dn#B"
+                     . "\4\"M\30t\@\xBD\17\0\0\x003abc\3\0\5\1\0Paaaaa\a\x8A+\xDD\0\0\0\0\\\13\x81\xFE"
+                  ),
+    "abcabcabc\n" . "abcabcabcaaaaaaaaaaaaaaa\n" . "TOBEORNOTTOBEORTOBEORNOT" . "abcabcabcaaaaaaaaaaaaaaa"
+  );
+
+###################################################
 
 {
 
