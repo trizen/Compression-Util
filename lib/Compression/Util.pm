@@ -3395,7 +3395,7 @@ sub bzip2_decompress($fh) {
                     $code .= read_bit($fh, \$buffer);
 
                     if (length($code) > $MaxHuffmanBits) {
-                        confess "[!] Something went wrong: length of code `$code` is > $MaxHuffmanBits.\n";
+                        confess "[!] Something went wrong: length of code `$code` is > $MaxHuffmanBits.";
                     }
 
                     if (exists($tree->{$code})) {
@@ -3849,7 +3849,7 @@ sub _extract_block_type_0 ($in_fh, $buffer) {
     my $expected_nlen = (~$len) & 0xffff;
 
     if ($expected_nlen != $nlen) {
-        confess "[!] The ~length value is not correct: $nlen (actual) != $expected_nlen (expected)\n";
+        confess "[!] The ~length value is not correct: $nlen (actual) != $expected_nlen (expected)";
     }
     else {
         $VERBOSE && print STDERR ":: Chunk length: $len\n";
@@ -3874,7 +3874,7 @@ sub _deflate_decode_huffman($in_fh, $buffer, $rev_dict, $dist_rev_dict, $search_
         $code .= read_bit_lsb($in_fh, $buffer);
 
         if (length($code) > $max_ll_code_len) {
-            confess "[!] Something went wrong: length of LL code `$code` is > $max_ll_code_len.\n";
+            confess "[!] Something went wrong: length of LL code `$code` is > $max_ll_code_len.";
         }
 
         if (exists($rev_dict->{$code})) {
@@ -3899,7 +3899,7 @@ sub _deflate_decode_huffman($in_fh, $buffer, $rev_dict, $dist_rev_dict, $search_
                     $dist_code .= read_bit_lsb($in_fh, $buffer);
 
                     if (length($dist_code) > $max_dist_code_len) {
-                        confess "[!] Something went wrong: length of distance code `$dist_code` is > $max_dist_code_len.\n";
+                        confess "[!] Something went wrong: length of distance code `$dist_code` is > $max_dist_code_len.";
                     }
 
                     if (exists($dist_rev_dict->{$dist_code})) {
@@ -3930,7 +3930,7 @@ sub _deflate_decode_huffman($in_fh, $buffer, $rev_dict, $dist_rev_dict, $search_
     }
 
     if ($code ne '') {
-        confess "[!] Something went wrong: code `$code` is not empty!\n";
+        confess "[!] Something went wrong: code `$code` is not empty!";
     }
 
     return $data;
@@ -3973,7 +3973,7 @@ sub _decode_CL_lengths($in_fh, $buffer, $CL_rev_dict, $size) {
         $code .= read_bit_lsb($in_fh, $buffer);
 
         if (length($code) > 7) {
-            confess "[!] Something went wrong: length of CL code `$code` is > 7.\n";
+            confess "[!] Something went wrong: length of CL code `$code` is > 7.";
         }
 
         if (exists($CL_rev_dict->{$code})) {
@@ -3992,7 +3992,7 @@ sub _decode_CL_lengths($in_fh, $buffer, $CL_rev_dict, $size) {
                 push @lengths, (0) x (11 + bits2int_lsb($in_fh, 7, $buffer));
             }
             else {
-                confess "Unknown CL symbol: $CL_symbol\n";
+                confess "Unknown CL symbol: $CL_symbol";
             }
 
             $code = '';
@@ -4065,7 +4065,7 @@ sub gzip_decompress ($in_fh) {
     my $MAGIC = (getc($in_fh) // confess "error") . (getc($in_fh) // confess "error");
 
     if ($MAGIC ne pack('C*', 0x1f, 0x8b)) {
-        confess "Not a valid Gzip container!\n";
+        confess "Not a valid Gzip container!";
     }
 
     my $CM     = getc($in_fh) // confess "error";                             # 0x08 = DEFLATE
@@ -4144,7 +4144,7 @@ sub gzip_decompress ($in_fh) {
     my $actual_crc32 = $crc32;
 
     if ($stored_crc32 != $actual_crc32) {
-        confess "[!] The CRC32 does not match: $actual_crc32 (actual) != $stored_crc32 (stored)\n";
+        confess "[!] The CRC32 does not match: $actual_crc32 (actual) != $stored_crc32 (stored)";
     }
     else {
         $VERBOSE && print STDERR ":: CRC32 value: $actual_crc32\n";
@@ -4153,7 +4153,7 @@ sub gzip_decompress ($in_fh) {
     my $stored_length = bits2int_lsb($in_fh, 32, \$buffer);
 
     if ($stored_length != $actual_length) {
-        confess "[!] The length does not match: $actual_length (actual) != $stored_length (stored)\n";
+        confess "[!] The length does not match: $actual_length (actual) != $stored_length (stored)";
     }
     else {
         $VERBOSE && print STDERR ":: Total length: $actual_length\n";
@@ -4390,6 +4390,7 @@ B<Compression::Util> is a function-based module, implementing various techniques
     * LZW compression
     * Bzip2 (de)compression
     * Gzip (de)compression
+    * LZ4 decompression
 
 The provided techniques can be easily combined in various ways to create powerful compressors, such as the Bzip2 compressor, which is a pipeline of the following methods:
 

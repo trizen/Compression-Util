@@ -47,6 +47,7 @@ $opts{d} ? decompress(\*STDIN, \*STDOUT) : compress(\*STDIN, \*STDOUT);
     * LZW compression
     * Bzip2 (de)compression
     * Gzip (de)compression
+    * LZ4 decompression
 
 The provided techniques can be easily combined in various ways to create powerful compressors, such as the Bzip2 compressor, which is a pipeline of the following methods:
 
@@ -212,6 +213,8 @@ By default, `$LZ_MAX_CHAIN_LEN` is set to `32`.
 
       lzw_compress($string)                # LZW + abc_encode() compression
       lzw_decompress($fh)                  # Inverse of the above method
+
+      lz4_decompress($fh)                  # Decompress LZ4 data
 ```
 
 # MEDIUM-LEVEL FUNCTIONS
@@ -486,6 +489,15 @@ High-level function that performs byte-oriented LZSS compression, inspired by LZ
 ```
 
 Inverse of `lzb_compress()`.
+
+## lz4\_decompress
+
+```perl
+    my $data = lz4_decompress($fh);
+    my $data = lz4_decompress($string);
+```
+
+Decompress LZ4 Frame data, given either a string or an input file-handle. Concatenated LZ4 Frames are also supported.
 
 ## lzw\_compress
 
@@ -1469,6 +1481,10 @@ The functions can be combined in various ways, easily creating novel compression
     * [https://datatracker.ietf.org/doc/html/rfc1952](https://datatracker.ietf.org/doc/html/rfc1952)
 - BZIP2 Format Specification, by Joe Tsai:
     * [https://github.com/dsnet/compress/blob/master/doc/bzip2-format.pdf](https://github.com/dsnet/compress/blob/master/doc/bzip2-format.pdf)
+- LZ4 Frame format
+    * [https://github.com/lz4/lz4/blob/dev/doc/lz4\_Frame\_format.md](https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md)
+- LZ4 Block format
+    * [https://github.com/lz4/lz4/blob/dev/doc/lz4\_Block\_format.md](https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md)
 - Data Compression (Summer 2023) - Lecture 4 - The Unix 'compress' Program:
     * [https://youtube.com/watch?v=1cJL9Va80Pk](https://youtube.com/watch?v=1cJL9Va80Pk)
 - Data Compression (Summer 2023) - Lecture 5 - Basic Techniques:
