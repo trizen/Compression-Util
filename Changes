@@ -4,12 +4,16 @@ Revision history for Compression-Util
 
         [ADDITIONS]
 
-        - Added the `lz4_decompress()` function.
+        - Added the `lz4_compress()` and `lz4_decompress()`  functions.
 
         [IMPROVEMENTS]
 
         - Slightly better performance in `mtf_encode()`.
         - Replaced all "die" statements, with Carp::confess(), for better debugging.
+
+        [BUG-FIXES]
+
+        - Allow `$LZ77_MIN_LEN` to be set by the user to a value greater than 4, before calling `gzip_compress()`.
 
 0.11    2024-08-22
 

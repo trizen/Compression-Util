@@ -150,6 +150,7 @@ our %EXPORT_TAGS = (
           lzb_compress
           lzb_decompress
 
+          lz4_compress
           lz4_decompress
 
           ac_encode
@@ -2869,10 +2870,11 @@ sub lzss_decompress_symbolic($fh, $entropy_sub = \&decode_huffman_entry) {
 
 sub lzb_compress ($chunk, $lzss_encoding_sub = \&lzss_encode) {
 
-    local $LZ_MAX_DIST = (1 << 16) - 1;
-    local $LZ_MAX_LEN  = ~0;
-
-    my ($literals, $distances, $lengths) = $lzss_encoding_sub->($chunk);
+    my ($literals, $distances, $lengths) = do {
+        local $LZ_MAX_DIST = (1 << 16) - 1;
+        local $LZ_MAX_LEN  = ~0;
+        $lzss_encoding_sub->($chunk);
+    };
 
     my $literals_end = $#{$literals};
     my $data         = '';
@@ -3750,16 +3752,16 @@ sub gzip_compress ($in_fh, $lzss_encoding_sub = \&lzss_encode) {
 
     open my $out_fh, '>:raw', \$compressed;
 
-    local $Compression::Util::LZ_MIN_LEN  = 4;                # minimum match length in LZ parsing
-    local $Compression::Util::LZ_MAX_LEN  = 258;              # maximum match length in LZ parsing
-    local $Compression::Util::LZ_MAX_DIST = (1 << 15) - 1;    # maximum allowed back-reference distance in LZ parsing
+    local $LZ_MIN_LEN  = 4 if ($LZ_MIN_LEN < 4);    # minimum match length in LZ parsing
+    local $LZ_MAX_LEN  = 258;                       # maximum match length in LZ parsing
+    local $LZ_MAX_DIST = (1 << 15) - 1;             # maximum allowed back-reference distance in LZ parsing
 
-    state $MAGIC  = pack('C*', 0x1f, 0x8b);                   # magic MIME type
-    state $CM     = chr(0x08);                                # 0x08 = DEFLATE
-    state $FLAGS  = chr(0x00);                                # flags
-    state $MTIME  = pack('C*', (0x00) x 4);                   # modification time
-    state $XFLAGS = chr(0x00);                                # extra flags
-    state $OS     = chr(0x03);                                # 0x03 = Unix
+    state $MAGIC  = pack('C*', 0x1f, 0x8b);         # magic MIME type
+    state $CM     = chr(0x08);                      # 0x08 = DEFLATE
+    state $FLAGS  = chr(0x00);                      # flags
+    state $MTIME  = pack('C*', (0x00) x 4);         # modification time
+    state $XFLAGS = chr(0x00);                      # extra flags
+    state $OS     = chr(0x03);                      # 0x03 = Unix
 
     print $out_fh $MAGIC, $CM, $FLAGS, $MTIME, $XFLAGS, $OS;
 
@@ -3768,7 +3770,7 @@ sub gzip_compress ($in_fh, $lzss_encoding_sub = \&lzss_encode) {
 
     my $bitstring = '';
 
-    if (eof($in_fh)) {                                        # empty file
+    if (eof($in_fh)) {                              # empty file
         $bitstring = '1' . '10' . '0000000';
     }
 
@@ -4044,9 +4046,9 @@ sub gzip_decompress ($in_fh) {
 
     open my $out_fh, '>:raw', \$decompressed;
 
-    local $Compression::Util::LZ_MIN_LEN  = 4;                # minimum match length in LZ parsing
-    local $Compression::Util::LZ_MAX_LEN  = 258;              # maximum match length in LZ parsing
-    local $Compression::Util::LZ_MAX_DIST = (1 << 15) - 1;    # maximum allowed back-reference distance in LZ parsing
+    local $LZ_MIN_LEN  = 4 if ($LZ_MIN_LEN < 4);    # minimum match length in LZ parsing
+    local $LZ_MAX_LEN  = 258;                       # maximum match length in LZ parsing
+    local $LZ_MAX_DIST = (1 << 15) - 1;             # maximum allowed back-reference distance in LZ parsing
 
     my $MAGIC = (getc($in_fh) // confess "error") . (getc($in_fh) // confess "error");
 
@@ -4160,7 +4162,86 @@ sub gzip_decompress ($in_fh) {
 # LZ4 compressor
 ###############################
 
-# TODO: implement it
+sub lz4_compress($fh, $lzss_encoding_sub = \&lzss_encode) {
+
+    if (ref($fh) eq '') {
+        open(my $fh2, '<:raw', \$fh) or confess "error: $!";
+        return __SUB__->($fh2);
+    }
+
+    my $compressed = '';
+
+    $compressed .= int2bytes_lsb(0x184D2204, 4);    # LZ4 magic number
+
+    my $fd = '';                                    # frame description
+    $fd .= chr(0b01_10_00_00);                      # flags (FLG)
+    $fd .= chr(0b0_111_0000);                       # block description (BD)
+
+    $compressed .= $fd;
+    $compressed .= chr(115);                        # header checksum
+
+    state $CHUNK_SIZE = 1 << 17;
+
+    while (read($fh, (my $chunk), $CHUNK_SIZE)) {
+
+        my ($literals, $distances, $lengths) = do {
+            local $LZ_MIN_LEN  = 4 if ($LZ_MIN_LEN < 4);
+            local $LZ_MAX_LEN  = ~0;
+            local $LZ_MAX_DIST = (1 << 16) - 1;
+            $lzss_encoding_sub->(substr($chunk, 0, -5));
+        };
+
+        # The last 5 bytes of each block must be literals
+        # https://github.com/lz4/lz4/issues/1495
+        push @$literals, unpack('C*', substr($chunk, -5));
+
+        my $literals_end = $#{$literals};
+
+        my $block = '';
+
+        for (my $i = 0 ; $i <= $literals_end ; ++$i) {
+
+            my @uncompressed;
+            while ($i <= $literals_end and defined($literals->[$i])) {
+                push @uncompressed, $literals->[$i];
+                ++$i;
+            }
+
+            my $literals_string = pack('C*', @uncompressed);
+            my $literals_length = scalar(@uncompressed);
+
+            my $match_len = $lengths->[$i] ? ($lengths->[$i] - 4) : 0;
+
+            $block .= chr((($literals_length >= 15 ? 15 : $literals_length) << 4) | ($match_len >= 15 ? 15 : $match_len));
+
+            $literals_length -= 15;
+            $match_len       -= 15;
+
+            while ($literals_length >= 0) {
+                $block .= ($literals_length >= 255 ? "\xff" : chr($literals_length));
+                $literals_length -= 255;
+            }
+
+            $block .= $literals_string;
+
+            my $dist = $distances->[$i] // last;
+            $block .= pack('b*', scalar reverse sprintf('%016b', $dist));
+
+            while ($match_len >= 0) {
+                $block .= ($match_len >= 255 ? "\xff" : chr($match_len));
+                $match_len -= 255;
+            }
+        }
+
+        if ($block ne '') {
+            $compressed .= int2bytes_lsb(length($block), 4);
+            $compressed .= $block;
+        }
+    }
+
+    $compressed .= int2bytes_lsb(0x00000000, 4);    # EndMark
+    return $compressed;
+}
 
 ###############################
 # LZ4 decompressor
@@ -4377,12 +4458,12 @@ B<Compression::Util> is a function-based module, implementing various techniques
     * Fibonacci coding
     * Elias gamma/omega coding
     * Delta coding
-    * BWT-based compression
-    * LZ77/LZSS compression
-    * LZW compression
+    * BWT-based (de)compression
+    * LZ77/LZSS (de)compression
+    * LZW (de)compression
     * Bzip2 (de)compression
     * Gzip (de)compression
-    * LZ4 decompression
+    * LZ4 (de)compression
 
 The provided techniques can be easily combined in various ways to create powerful compressors, such as the Bzip2 compressor, which is a pipeline of the following methods:
 
@@ -4542,7 +4623,8 @@ B<NOTE:> the function C<lzss_encode_fast()> will ignore this value, always using
       lzw_compress($string)                # LZW + abc_encode() compression
       lzw_decompress($fh)                  # Inverse of the above method
 
-      lz4_decompress($fh)                  # Decompress LZ4 data
+      lz4_compress($string)                # Compress a given string using the LZ4 frame format
+      lz4_decompress($fh)                  # Inverse of the above method
 
 =head1 MEDIUM-LEVEL FUNCTIONS
 
@@ -4788,6 +4870,16 @@ High-level function that performs byte-oriented LZSS compression, inspired by LZ
     my $data = lzb_decompress($string);
 
 Inverse of C<lzb_compress()>.
+
+=head2 lz4_compress
+
+    my $string = lz4_compress($fh);
+    my $string = lz4_compress($data);
+    my $string = lz4_compress($data, \&lzss_encode_fast);   # with fast-LZ parsing
+
+Valid LZ4 compressor, using the LZ4 Frame format, given either a string or an input file-handle.
+
+The input data is split into chunks of length C<2**17> and compressed into independent LZ4 blocks.
 
 =head2 lz4_decompress
 
