@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 789;
+plan tests => 790;
 
 ##################################
 
@@ -494,6 +494,7 @@ is(lz4_decompress("\4\"M\30d\@\xA7\1\0\0\x80a\0\0\0\0Vt\rU"),                   
 is(lz4_decompress("\4\"M\30`ps\2\0\0\0\20a\0\0\0\0"),                                                "a");
 is(lz4_decompress("\4\"M\30`ps\b\0\0\x002abc\3\0\20\n\0\0\0\0"),                                     "abcabcabc\n");
 is(lz4_decompress("\4\"M\30d\@\xA7\n\0\0\x80abcabcabc\n\0\0\0\0\xE9j\xA1C"),                         "abcabcabc\n");
+is(lz4_decompress("\4\"M\30`ps\13\0\0\0\xA0abcabcabc\n\0\0\0\0"),                                    "abcabcabc\n");
 is(lz4_decompress("\4\"M\30`ps\f\0\0\x003abc\3\0\31a\1\0\20\n\0\0\0\0"),                             "abcabcabcaaaaaaaaaaaaaaa\n");
 is(lz4_decompress("\4\"M\30d\@\xA7\17\0\0\x003abc\3\0\6\1\0Paaaa\n\0\0\0\0G}M\xC6"),                 "abcabcabcaaaaaaaaaaaaaaa\n");
 is(lz4_decompress("\4\"M\30`\@\x82\17\0\0\x003abc\3\0\6\1\0Paaaa\n\0\0\0\0"),                        "abcabcabcaaaaaaaaaaaaaaa\n");

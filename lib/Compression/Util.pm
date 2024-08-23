@@ -958,7 +958,7 @@ sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
 
 sub bwt_encode ($s, $LOOKAHEAD_LEN = 128) {
 
-    if (ref($s) eq 'ARRAY') {
+    if (ref($s) ne '') {
         return bwt_encode_symbolic($s);
     }
 
@@ -1672,7 +1672,7 @@ sub mrl_decompress($fh, $entropy_sub = \&decode_huffman_entry) {
 
 sub bwt_compress ($chunk, $entropy_sub = \&create_huffman_entry) {
 
-    if (ref($chunk) eq 'ARRAY') {
+    if (ref($chunk) ne '') {
         return bwt_compress_symbolic($chunk, $entropy_sub);
     }
 
@@ -2259,31 +2259,28 @@ sub elias_omega_decode ($fh) {
 # LZSS SYMBOLIC
 ###################
 
-sub lzss_encode_symbolic ($symbols) {
+sub lzss_encode_symbolic($symbols, %params) {
 
     if (ref($symbols) eq '') {
-        return lzss_encode($symbols);
+        return lzss_encode($symbols, %params);
     }
 
-    my $la  = 0;
+    my $min_len       = $params{min_len}       // $LZ_MIN_LEN;
+    my $max_len       = $params{max_len}       // $LZ_MAX_LEN;
+    my $max_dist      = $params{max_dist}      // $LZ_MAX_DIST;
+    my $max_chain_len = $params{max_chain_len} // $LZ_MAX_CHAIN_LEN;
+
     my $end = $#$symbols;
-
-    my $min_len       = $LZ_MIN_LEN;          # minimum match length
-    my $max_len       = $LZ_MAX_LEN;          # maximum match length
-    my $max_dist      = $LZ_MAX_DIST;         # maximum offset distance
-    my $max_chain_len = $LZ_MAX_CHAIN_LEN;    # how many recent positions to keep track of
-
     my (@literals, @distances, @lengths, %table);
 
-    while ($la <= $end) {
-
+    for (my $la = 0 ; $la <= $end ;) {
         my $best_n = 1;
         my $best_p = $la;
 
         my $upto      = $la + $min_len - 1;
         my $lookahead = join(' ', @{$symbols}[$la .. ($upto > $end ? $end : $upto)]);
 
-        if (exists($table{$lookahead})) {
+        if (exists $table{$lookahead}) {
 
             foreach my $p (@{$table{$lookahead}}) {
 
@@ -2291,16 +2288,20 @@ sub lzss_encode_symbolic ($symbols) {
 
                 my $n = $min_len;
 
-                while ($la + $n <= $end and $symbols->[$la + $n - 1] == $symbols->[$p + $n - 1] and $n <= $max_len) {
-                    ++$n;
-                }
+                ++$n while ($la + $n <= $end and $symbols->[$la + $n - 1] == $symbols->[$p + $n - 1] and $n <= $max_len);
 
                 if ($n > $best_n) {
-                    $best_p = $p;
                     $best_n = $n;
+                    $best_p = $p;
+                    last if ($n > $max_len);
                 }
             }
+        }
 
+        if ($best_n == 1) {
+            $table{$lookahead} = [$la];
+        }
+        else {
             my @matched = @{$symbols}[$la .. $la + $best_n - 1];
             my @key_arr = @matched[0 .. $min_len - 1];
 
@@ -2308,18 +2309,11 @@ sub lzss_encode_symbolic ($symbols) {
 
                 my $key = join(' ', @key_arr);
                 unshift @{$table{$key}}, $la + $i;
-
-                if (scalar(@{$table{$key}}) > $max_chain_len) {
-                    pop @{$table{$key}};
-                }
+                pop @{$table{$key}} if (@{$table{$key}} > $max_chain_len);
 
                 shift(@key_arr);
                 push @key_arr, $matched[$i + $min_len];
             }
-        }
-
-        if ($best_n == 1) {
-            $table{$lookahead} = [$la];
         }
 
         if ($best_n > $min_len) {
@@ -2386,58 +2380,57 @@ sub lzss_decode_symbolic ($literals, $distances, $lengths) {
 # LZSS Encoding
 ###################
 
-sub lzss_encode ($str) {
+sub lzss_encode ($str, %params) {
 
-    if (ref($str) eq 'ARRAY') {
-        return lzss_encode_symbolic($str);
+    if (ref($str) ne '') {
+        return lzss_encode_symbolic($str, %params);
     }
 
-    my $la      = 0;
+    my $min_len       = $params{min_len}       // $LZ_MIN_LEN;
+    my $max_len       = $params{max_len}       // $LZ_MAX_LEN;
+    my $max_dist      = $params{max_dist}      // $LZ_MAX_DIST;
+    my $max_chain_len = $params{max_chain_len} // $LZ_MAX_CHAIN_LEN;
+
     my @symbols = unpack('C*', $str);
     my $end     = $#symbols;
 
-    my $min_len       = $LZ_MIN_LEN;          # minimum match length
-    my $max_len       = $LZ_MAX_LEN;          # maximum match length
-    my $max_dist      = $LZ_MAX_DIST;         # maximum offset distance
-    my $max_chain_len = $LZ_MAX_CHAIN_LEN;    # how many recent positions to keep track of
-
     my (@literals, @distances, @lengths, %table);
 
-    while ($la <= $end) {
+    for (my $la = 0 ; $la <= $end ;) {
 
         my $best_n = 1;
         my $best_p = $la;
 
         my $lookahead = substr($str, $la, $min_len);
 
-        if (exists($table{$lookahead})) {
-
+        if (exists $table{$lookahead}) {
             foreach my $p (@{$table{$lookahead}}) {
 
                 last if ($la - $p > $max_dist);
 
                 my $n = $min_len;
 
-                while ($la + $n <= $end and $symbols[$la + $n - 1] == $symbols[$p + $n - 1] and $n <= $max_len) {
-                    ++$n;
-                }
+                ++$n while ($la + $n <= $end and $symbols[$la + $n - 1] == $symbols[$p + $n - 1] and $n <= $max_len);
 
                 if ($n > $best_n) {
                     $best_p = $p;
                     $best_n = $n;
+                    last if ($best_n > $max_len);
                 }
             }
+        }
+
+        if ($best_n == 1) {
+            $table{$lookahead} = [$la];
+        }
+        else {
 
             my $matched = substr($str, $la, $best_n);
 
-            foreach my $i (0 .. length($matched) - $min_len) {
-
+            foreach my $i (0 .. $best_n - $min_len) {
                 my $key = substr($matched, $i, $min_len);
                 unshift @{$table{$key}}, $la + $i;
-
-                if (scalar(@{$table{$key}}) > $max_chain_len) {
-                    pop @{$table{$key}};
-                }
+                pop(@{$table{$key}}) if (@{$table{$key}} > $max_chain_len);
             }
         }
 
@@ -2509,18 +2502,18 @@ sub lzss_decode ($literals, $distances, $lengths) {
 # LZSSF Compression
 ###################
 
-sub lzss_encode_fast_symbolic ($symbols) {
+sub lzss_encode_fast_symbolic ($symbols, %params) {
 
     if (ref($symbols) eq '') {
-        return lzss_encode_fast($symbols);
+        return lzss_encode_fast($symbols, %params);
     }
 
     my $la  = 0;
     my $end = $#$symbols;
 
-    my $min_len  = $LZ_MIN_LEN;     # minimum match length
-    my $max_len  = $LZ_MAX_LEN;     # maximum match length
-    my $max_dist = $LZ_MAX_DIST;    # maximum offset distance
+    my $min_len  = $params{min_len}  // $LZ_MIN_LEN;     # minimum match length
+    my $max_len  = $params{max_len}  // $LZ_MAX_LEN;     # maximum match length
+    my $max_dist = $params{max_dist} // $LZ_MAX_DIST;    # maximum offset distance
 
     my (@literals, @distances, @lengths, %table);
 
@@ -2537,9 +2530,7 @@ sub lzss_encode_fast_symbolic ($symbols) {
             my $p = $table{$lookahead};
             my $n = $min_len;
 
-            while ($la + $n <= $end and $symbols->[$la + $n - 1] == $symbols->[$p + $n - 1] and $n <= $max_len) {
-                ++$n;
-            }
+            ++$n while ($la + $n <= $end and $symbols->[$la + $n - 1] == $symbols->[$p + $n - 1] and $n <= $max_len);
 
             $best_p = $p;
             $best_n = $n;
@@ -2571,13 +2562,12 @@ sub lzss_encode_fast_symbolic ($symbols) {
     }
 
     return (\@literals, \@distances, \@lengths);
-
 }
 
-sub lzss_encode_fast($str) {
+sub lzss_encode_fast($str, %params) {
 
-    if (ref($str) eq 'ARRAY') {
-        return lzss_encode_fast_symbolic($str);
+    if (ref($str) ne '') {
+        return lzss_encode_fast_symbolic($str, %params);
     }
 
     my @symbols = unpack('C*', $str);
@@ -2585,9 +2575,9 @@ sub lzss_encode_fast($str) {
     my $la  = 0;
     my $end = $#symbols;
 
-    my $min_len  = $LZ_MIN_LEN;     # minimum match length
-    my $max_len  = $LZ_MAX_LEN;     # maximum match length
-    my $max_dist = $LZ_MAX_DIST;    # maximum offset distance
+    my $min_len  = $params{min_len}  // $LZ_MIN_LEN;     # minimum match length
+    my $max_len  = $params{max_len}  // $LZ_MAX_LEN;     # maximum match length
+    my $max_dist = $params{max_dist} // $LZ_MAX_DIST;    # maximum offset distance
 
     my (@literals, @distances, @lengths, %table);
 
@@ -2603,9 +2593,7 @@ sub lzss_encode_fast($str) {
             my $p = $table{$lookahead};
             my $n = $min_len;
 
-            while ($la + $n <= $end and $symbols[$la + $n - 1] == $symbols[$p + $n - 1] and $n <= $max_len) {
-                ++$n;
-            }
+            ++$n while ($la + $n <= $end and $symbols[$la + $n - 1] == $symbols[$p + $n - 1] and $n <= $max_len);
 
             $best_p = $p;
             $best_n = $n;
@@ -4169,6 +4157,12 @@ sub gzip_decompress ($in_fh) {
 }
 
 ###############################
+# LZ4 compressor
+###############################
+
+# TODO: implement it
+
+###############################
 # LZ4 decompressor
 ###############################
 
@@ -5462,14 +5456,21 @@ Inverse of C<lz77_encode()> and C<lz77_encode_symbolic()>, respectively.
 =head2 lzss_encode / lzss_encode_fast / lzss_encode_symbolic / lzss_encode_fast_symbolic
 
     # Standard version
-    my ($literals, $distances, $lengths) = lzss_encode($data);
-    my ($literals, $distances, $lengths) = lzss_encode(\@symbols);
+    my ($literals, $distances, $lengths) = lzss_encode($data, %params);
+    my ($literals, $distances, $lengths) = lzss_encode(\@symbols, %params);
 
     # Faster version
-    my ($literals, $distances, $lengths) = lzss_encode_fast($data);
-    my ($literals, $distances, $lengths) = lzss_encode_fast(\@symbols);
+    my ($literals, $distances, $lengths) = lzss_encode_fast($data, %params);
+    my ($literals, $distances, $lengths) = lzss_encode_fast(\@symbols, %params);
 
 Low-level function that applies the LZSS (Lempel-Ziv-Storer-Szymanski) algorithm on the provided data.
+
+The accepted C<%params> are:
+
+    min_len         => $LZ_MIN_LEN,
+    max_len         => $LZ_MAX_LEN,
+    max_dist        => $LZ_MAX_DIST,
+    max_chain_len   => $LZ_MAX_CHAIN_LEN,
 
 The function returns three values:
 
