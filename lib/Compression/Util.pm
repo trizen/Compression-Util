@@ -4106,6 +4106,7 @@ sub gzip_decompress ($in_fh) {
         $VERBOSE && say STDERR ":: Comment: $comment";
     }
 
+    # TODO: verify the header checksum
     if ($has_header_checksum) {
         my $header_checksum = bytes2int_lsb($in_fh, 2);
         $VERBOSE && say STDERR ":: Header checksum: $header_checksum";
