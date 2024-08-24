@@ -1,5 +1,12 @@
 Revision history for Compression-Util
 
+0.13    2024-??-??
+
+        [BUG-FIXES]
+
+        - Fixed the extraction of Gzip data that contains a comment.
+        - More Gzip flags are now recognized.
+
 0.12    2024-08-23
 
         [ADDITIONS]
