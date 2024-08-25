@@ -3186,11 +3186,11 @@ sub bzip2_compress($fh) {
         return __SUB__->($fh2);
     }
 
-    my $level = 1;
+    my $level = 9;
 
-    # There is a CRC32 issue on some (binary) inputs, when using large chunk sizes
+    # There is a CRC32 issue on some non-compressible inputs, when using very large chunk sizes
     ## my $CHUNK_SIZE = 100_000 * $level;
-    my $CHUNK_SIZE = 1 << 16;
+    my $CHUNK_SIZE = 1 << 17;
 
     my $compressed = "BZh" . $level;
 
@@ -3204,14 +3204,12 @@ sub bzip2_compress($fh) {
 
         $bitstring .= $block_header_bitstring;
 
-        # FIXME: there may be a bug in the computation of crc32
         my $crc32 = crc32(pack('b*', unpack('B*', $chunk)));
         $VERBOSE && say STDERR "CRC32: $crc32";
 
         $crc32 = oct('0b' . int2bits_lsb($crc32, 32));
         $VERBOSE && say STDERR "Bzip2-CRC32: $crc32";
 
-        # FIXME: there may be a bug in the computation of stream_crc32
         $stream_crc32 = ($crc32 ^ (0xffffffff & ((0xffffffff & ($stream_crc32 << 1)) | (($stream_crc32 >> 31) & 0x1)))) & 0xffffffff;
 
         $bitstring .= int2bits($crc32, 32);
