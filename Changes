@@ -1,5 +1,11 @@
 Revision history for Compression-Util
 
+0.14    2024-??-??
+
+        [ADDITIONS]
+
+        - Added the `adler32()` checksum function.
+
 0.13    2024-08-25
 
         [IMPROVEMENTS]

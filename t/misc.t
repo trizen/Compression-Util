@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 822;
+plan tests => 824;
 
 ##################################
 
@@ -397,13 +397,21 @@ is_deeply(lzss_decompress_symbolic(lzss_compress_symbolic([])),  []);
 ###############################################
 
 {
-
     is(crc32("The quick brown fox jumps over the lazy dog"), 0x414fa339);
 
     my $p1 = crc32("The quick brown fox jumps");
     my $p2 = crc32(" over the lazy dog", $p1);
 
     is($p2, 0x414fa339);
+}
+
+{
+    is(adler32("The quick brown fox jumps over the lazy dog"), 0x5bdc0fda);
+
+    my $p1 = adler32("The quick brown fox jumps");
+    my $p2 = adler32(" over the lazy dog", $p1);
+
+    is($p2, 0x5bdc0fda);
 }
 
 {

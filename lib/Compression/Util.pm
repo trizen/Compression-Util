@@ -27,6 +27,7 @@ our %EXPORT_TAGS = (
         qw(
 
           crc32
+          adler32
 
           read_bit
           read_bit_lsb
@@ -3146,6 +3147,21 @@ sub crc32($str, $crc = 0) {
     return (($crc & 0xffffffff) ^ 0xffffffff);
 }
 
+sub adler32($str, $adler = 1) {
+
+    # Reference:
+    #   https://datatracker.ietf.org/doc/html/rfc1950#section-9
+
+    my $s1 = $adler & 0xffff;
+    my $s2 = ($adler >> 16) & 0xffff;
+
+    foreach my $c (unpack('C*', $str)) {
+        $s1 = ($s1 + $c) % 65521;
+        $s2 = ($s2 + $s1) % 65521;
+    }
+    return (($s2 << 16) + $s1);
+}
+
 #############################
 # Bzip2 compression
 #############################
@@ -5349,7 +5365,14 @@ The function returns the decoded string.
     my $int32 = crc32($data);
     my $int32 = crc32($data, $prev_crc32);
 
-Compute the CRC32 of a given string.
+Compute the CRC32 checksum of a given string.
+
+=head2 adler32
+
+    my $int32 = adler32($data);
+    my $int32 = adler32($data, $prev_adler32);
+
+Compute the Adler32 checksum of a given string.
 
 =head2 read_bit
 
