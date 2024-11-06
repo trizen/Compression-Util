@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle);
 
-plan tests => 824;
+plan tests => 837;
 
 ##################################
 
@@ -577,3 +577,107 @@ is(
 }
 
 ###################################################
+
+# DEFLATE block type 0
+
+{
+    my $chunk        = "foobar hello world";
+    my $bt0_header   = deflate_create_block_type_0_header($chunk);
+    my $block_type_0 = pack('b*', '00') . pack('b*', $bt0_header) . $chunk;
+
+    open my $fh, '<:raw', \$block_type_0;
+    my ($buffer, $search_window) = ('', '');
+    my $decoded_chunk = deflate_extract_next_block($fh, \$buffer, \$search_window);
+
+    is($chunk,         $decoded_chunk);
+    is($search_window, $chunk);
+}
+
+# DEFLATE block type 0
+
+{
+    my $chunk        = "hello world 12";
+    my $bt0_header   = deflate_create_block_type_0_header($chunk);
+    my $block_type_0 = pack('b*', $bt0_header) . $chunk;
+
+    my ($buffer, $search_window) = ('', '');
+    open my $fh, '<:raw', \$block_type_0;
+    my $decoded_chunk = deflate_extract_block_type_0($fh, \$buffer, \$search_window);
+
+    is($chunk, $decoded_chunk);
+}
+
+# DEFLATE block type 1
+
+{
+    my $chunk = "foobar hello world";
+
+    my ($literals, $distances, $lengths) = lzss_encode($chunk, min_len => 4, max_len => 258, max_dist => 2**15 - 1);
+
+    my $bitstring    = deflate_create_block_type_1($literals, $distances, $lengths);
+    my $block_type_1 = pack('b*', $bitstring);
+    open my $fh, '<:raw', \$block_type_1;
+    my ($buffer, $search_window) = ('', '');
+    my $decoded_chunk = deflate_extract_next_block($fh, \$buffer, \$search_window);
+
+    is($chunk,         $decoded_chunk);
+    is($search_window, $chunk);
+}
+
+# DEFLATE block type 1
+
+{
+    my $chunk = "foobar hello world";
+
+    my ($literals, $distances, $lengths) = lzss_encode($chunk, min_len => 4, max_len => 258, max_dist => 2**15 - 1);
+
+    my $bitstring    = deflate_create_block_type_1($literals, $distances, $lengths);
+    my $block_type_1 = pack('b*', $bitstring);
+    open my $fh, '<:raw', \$block_type_1;
+
+    my ($buffer, $search_window) = ('', '');
+    my $block_type = bits2int_lsb($fh, 2, \$buffer);
+    is($block_type, 1);
+
+    my $decoded_chunk = deflate_extract_block_type_1($fh, \$buffer, \$search_window);
+
+    is($chunk,         $decoded_chunk);
+    is($search_window, $chunk);
+}
+
+# DEFLATE block type 2
+
+{
+    my $chunk = "foobar hello world";
+
+    my ($literals, $distances, $lengths) = lzss_encode($chunk, min_len => 4, max_len => 258, max_dist => 2**15 - 1);
+
+    my $bitstring    = deflate_create_block_type_2($literals, $distances, $lengths);
+    my $block_type_2 = pack('b*', $bitstring);
+    open my $fh, '<:raw', \$block_type_2;
+    my ($buffer, $search_window) = ('', '');
+    my $decoded_chunk = deflate_extract_next_block($fh, \$buffer, \$search_window);
+
+    is($chunk,         $decoded_chunk);
+    is($search_window, $chunk);
+}
+
+# DEFLATE block type 2
+
+{
+    my $chunk = "foobar hello world";
+
+    my ($literals, $distances, $lengths) = lzss_encode($chunk, min_len => 4, max_len => 258, max_dist => 2**15 - 1);
+
+    my $bitstring    = deflate_create_block_type_2($literals, $distances, $lengths);
+    my $block_type_2 = pack('b*', $bitstring);
+    open my $fh, '<:raw', \$block_type_2;
+
+    my ($buffer, $search_window) = ('', '');
+    my $block_type = bits2int_lsb($fh, 2, \$buffer);
+    is($block_type, 2);
+
+    my $decoded_chunk = deflate_extract_block_type_2($fh, \$buffer, \$search_window);
+    is($decoded_chunk, $chunk);
+    is($search_window, $chunk);
+}
