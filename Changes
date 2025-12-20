@@ -1,5 +1,11 @@
 Revision history for Compression-Util
 
+0.16    2026-??-??
+
+        [IMPROVEMENTS]
+
+        - Better performance in `bwt_sort()` for certain inputs. (~2x faster)
+
 0.15    2025-04-03
 
         [BUG-FIXES]

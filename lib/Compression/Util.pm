@@ -951,23 +951,26 @@ sub binary_vrl_decode ($bitstring) {
 ############################
 
 sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
-#<<<
-    [
-     map { $_->[1] } sort {
-              ($a->[0] cmp $b->[0])
-           || ((substr($s, $a->[1]) . substr($s, 0, $a->[1])) cmp (substr($s, $b->[1]) . substr($s, 0, $b->[1])))
-     }
-     map {
-         my $t = substr($s, $_, $LOOKAHEAD_LEN);
+    my $len      = length($s);
+    my $double_s = $s . $s;                  # Pre-compute doubled string
 
-         if (length($t) < $LOOKAHEAD_LEN) {
-             $t .= substr($s, 0, ($_ < $LOOKAHEAD_LEN) ? $_ : ($LOOKAHEAD_LEN - length($t)));
-         }
+    # Schwartzian transform with optimized sorting
+    return [
+        map  { $_->[1] }
+        sort { ($a->[0] cmp $b->[0]) || (substr($double_s, $a->[1], $len) cmp substr($double_s, $b->[1], $len)) }
+        map {
+            my $pos = $_;
+            my $end = $pos + $LOOKAHEAD_LEN;
 
-         [$t, $_]
-       } 0 .. length($s) - 1
+            # Handle wraparound efficiently
+            my $t =
+              ($end <= $len)
+              ? substr($s,        $pos, $LOOKAHEAD_LEN)
+              : substr($double_s, $pos, $LOOKAHEAD_LEN);
+
+            [$t, $pos]
+          } 0 .. $len - 1
     ];
-#>>>
 }
 
 sub bwt_encode ($s, $LOOKAHEAD_LEN = 128) {
@@ -977,12 +980,16 @@ sub bwt_encode ($s, $LOOKAHEAD_LEN = 128) {
     }
 
     my $bwt = bwt_sort($s, $LOOKAHEAD_LEN);
-    my $ret = join('', map { substr($s, $_ - 1, 1) } @$bwt);
+    my $len = length($s);
 
+    my $ret = '';
     my $idx = 0;
-    foreach my $i (@$bwt) {
-        $i || last;
-        ++$idx;
+
+    my $i = 0;
+    foreach my $pos (@$bwt) {
+        $ret .= substr($s, $pos - 1, 1);
+        $idx = $i if !$pos;
+        ++$i;
     }
 
     return ($ret, $idx);
