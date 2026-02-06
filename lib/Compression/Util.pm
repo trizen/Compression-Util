@@ -980,7 +980,6 @@ sub bwt_encode ($s, $LOOKAHEAD_LEN = 128) {
     }
 
     my $bwt = bwt_sort($s, $LOOKAHEAD_LEN);
-    my $len = length($s);
 
     my $ret = '';
     my $idx = 0;
@@ -1895,40 +1894,46 @@ sub huffman_from_code_lengths ($code_lengths) {
     # This algorithm is based on the pseudocode in RFC 1951 (Section 3.2.2)
     # (Steps are numbered as in the RFC)
 
-    # Step 1
+    # Step 1: Count the number of codes for each length
     my $max_length    = max(@$code_lengths) // 0;
     my @length_counts = (0) x ($max_length + 1);
+
     foreach my $length (@$code_lengths) {
-        ++$length_counts[$length];
+
+        # Treat undef or negative lengths as 0 (unused)
+        if (defined($length) and $length > 0) {
+            ++$length_counts[$length];
+        }
     }
 
-    # Step 2
+    # Step 2: Generate the starting numerical value for each length
     my $code = 0;
     $length_counts[0] = 0;
     my @next_code = (0) x ($max_length + 1);
+
     foreach my $bits (1 .. $max_length) {
         $code = ($code + $length_counts[$bits - 1]) << 1;
         $next_code[$bits] = $code;
     }
 
-    # Step 3
-    my @code_table;
-    foreach my $n (0 .. $#{$code_lengths}) {
-        my $length = $code_lengths->[$n];
-        if ($length != 0) {
-            $code_table[$n] = sprintf('%0*b', $length, $next_code[$length]);
-            ++$next_code[$length];
-        }
-    }
-
+    # Step 3: Assign numerical values to all codes
     my %dict;
     my %rev_dict;
 
-    foreach my $i (0 .. $#{$code_lengths}) {
-        my $code = $code_table[$i];
-        if (defined($code)) {
-            $dict{$i}        = $code;
-            $rev_dict{$code} = $i;
+    foreach my $n (0 .. $#{$code_lengths}) {
+        my $length = $code_lengths->[$n];
+
+        # Skip zero-length codes (unused symbols)
+        if (defined($length) and $length != 0) {
+
+            # Format the integer code as a binary string with $length bits
+            my $binary_code = sprintf('%0*b', $length, $next_code[$length]);
+
+            $dict{$n}               = $binary_code;
+            $rev_dict{$binary_code} = $n;
+
+            # Increment the code for the next symbol of this length
+            ++$next_code[$length];
         }
     }
 
