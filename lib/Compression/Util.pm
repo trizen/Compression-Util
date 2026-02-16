@@ -1995,7 +1995,7 @@ sub huffman_from_freq($freq) {
     # Initialize Heap
     # Structure: [ [symbol_or_children], frequency ]
     my @heap;
-    foreach my $k (keys %$freq) {
+    foreach my $k (sort { $a <=> $b } keys %$freq) {
         _heap_insert(\@heap, [$k, $freq->{$k}]);
     }
 
