@@ -1953,8 +1953,6 @@ sub _heap_insert ($heap, $node) {
     # Sift Up
     while ($i > 0) {
         my $p = int(($i - 1) / 2);
-
-        # Compare frequencies (index 1)
         last if ($heap->[$p][1] <= $heap->[$i][1]);
         @$heap[$i, $p] = @$heap[$p, $i];
         $i = $p;
@@ -2001,10 +1999,10 @@ sub huffman_from_freq($freq) {
         _heap_insert(\@heap, [$k, $freq->{$k}]);
     }
 
-    # Edge case: If only 1 distinct item exists, wrap it to ensure a code length > 0.
+    # Edge case: only one item
     if (@heap == 1) {
-        my $only = _heap_extract(\@heap);
-        _heap_insert(\@heap, [[$only], $only->[1]]);
+        my $item = $heap[0];
+        return huffman_from_code_lengths({$item->[0] => 1});
     }
 
     # Build Huffman Tree
