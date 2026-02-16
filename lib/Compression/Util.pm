@@ -1889,16 +1889,23 @@ sub _huffman_walk_tree ($node, $code, $h) {
     return $h;
 }
 
-sub huffman_from_code_lengths ($code_lengths) {
+sub huffman_from_code_lengths ($code_lengths_table) {
+
+    if (ref($code_lengths_table) eq 'ARRAY') {
+        my %table = map { (($code_lengths_table->[$_] > 0) ? ($_, $code_lengths_table->[$_]) : ()) } 0 .. $#{$code_lengths_table};
+        return __SUB__->(\%table);
+    }
 
     # This algorithm is based on the pseudocode in RFC 1951 (Section 3.2.2)
     # (Steps are numbered as in the RFC)
 
+    my @code_lengths = map { [$_, $code_lengths_table->{$_}] } sort { $a <=> $b } keys %$code_lengths_table;
+
     # Step 1: Count the number of codes for each length
-    my $max_length    = max(@$code_lengths) // 0;
+    my $max_length    = max(map { $_->[1] } @code_lengths) // 0;
     my @length_counts = (0) x ($max_length + 1);
 
-    foreach my $length (@$code_lengths) {
+    foreach my $length (map { $_->[1] } @code_lengths) {
 
         # Treat undef or negative lengths as 0 (unused)
         if (defined($length) and $length > 0) {
@@ -1919,9 +1926,8 @@ sub huffman_from_code_lengths ($code_lengths) {
     # Step 3: Assign numerical values to all codes
     my %dict;
     my %rev_dict;
-
-    foreach my $n (0 .. $#{$code_lengths}) {
-        my $length = $code_lengths->[$n];
+    foreach my $pair (@code_lengths) {
+        my ($key, $length) = @$pair;
 
         # Skip zero-length codes (unused symbols)
         if (defined($length) and $length != 0) {
@@ -1929,8 +1935,8 @@ sub huffman_from_code_lengths ($code_lengths) {
             # Format the integer code as a binary string with $length bits
             my $binary_code = sprintf('%0*b', $length, $next_code[$length]);
 
-            $dict{$n}               = $binary_code;
-            $rev_dict{$binary_code} = $n;
+            $dict{$key}             = $binary_code;
+            $rev_dict{$binary_code} = $key;
 
             # Increment the code for the next symbol of this length
             ++$next_code[$length];
@@ -1940,38 +1946,86 @@ sub huffman_from_code_lengths ($code_lengths) {
     return (wantarray ? (\%dict, \%rev_dict) : \%dict);
 }
 
-# make a tree, and return resulting dictionaries
-sub huffman_from_freq ($freq) {
+sub _heap_insert ($heap, $node) {
+    push @$heap, $node;
+    my $i = $#$heap;
 
-    my @nodes      = map { [$_, $freq->{$_}] } sort { $a <=> $b } keys %$freq;
-    my $max_symbol = scalar(@nodes) ? $nodes[-1][0] : -1;
+    # Sift Up
+    while ($i > 0) {
+        my $p = int(($i - 1) / 2);
 
-    do {    # poor man's priority queue
-        @nodes = sort { $a->[1] <=> $b->[1] } @nodes;
-        my ($x, $y) = splice(@nodes, 0, 2);
-        if (defined($x)) {
-            if (defined($y)) {
-                push @nodes, [[$x, $y], $x->[1] + $y->[1]];
-            }
-            else {
-                push @nodes, [[$x], $x->[1]];
-            }
-        }
-    } while (@nodes > 1);
+        # Compare frequencies (index 1)
+        last if ($heap->[$p][1] <= $heap->[$i][1]);
+        @$heap[$i, $p] = @$heap[$p, $i];
+        $i = $p;
+    }
+}
 
-    my $h = _huffman_walk_tree($nodes[0], '', {});
+sub _heap_extract ($heap) {
 
-    my @code_lengths;
-    foreach my $i (0 .. $max_symbol) {
-        if (exists $h->{$i}) {
-            $code_lengths[$i] = length($h->{$i});
-        }
-        else {
-            $code_lengths[$i] = 0;
+    @$heap || return;
+
+    # Swap root with last element and pop
+    my $min  = $heap->[0];
+    my $last = pop @$heap;
+
+    if (@$heap) {
+        $heap->[0] = $last;
+        my $i   = 0;
+        my $cnt = scalar @$heap;
+
+        # Sift Down
+        while (1) {
+            my $c1 = 2 * $i + 1;
+            my $c2 = 2 * $i + 2;
+
+            last if $c1 >= $cnt;
+
+            # Find smaller child
+            my $swap = ($c2 < $cnt && $heap->[$c2][1] < $heap->[$c1][1]) ? $c2 : $c1;
+            last if ($heap->[$i][1] <= $heap->[$swap][1]);
+            @$heap[$i, $swap] = @$heap[$swap, $i];
+            $i = $swap;
         }
     }
 
-    huffman_from_code_lengths(\@code_lengths);
+    return $min;
+}
+
+sub huffman_from_freq($freq) {
+
+    # Initialize Heap
+    # Structure: [ [symbol_or_children], frequency ]
+    my @heap;
+    foreach my $k (keys %$freq) {
+        _heap_insert(\@heap, [$k, $freq->{$k}]);
+    }
+
+    # Edge case: If only 1 distinct item exists, wrap it to ensure a code length > 0.
+    if (@heap == 1) {
+        my $only = _heap_extract(\@heap);
+        _heap_insert(\@heap, [[$only], $only->[1]]);
+    }
+
+    # Build Huffman Tree
+    while (@heap > 1) {
+        my $x = _heap_extract(\@heap);
+        my $y = _heap_extract(\@heap);
+
+        # Create new internal node
+        # Content is [child_x, child_y], Frequency is sum
+        _heap_insert(\@heap, [[$x, $y], $x->[1] + $y->[1]]);
+    }
+
+    # Generate Codes
+    my $h = _huffman_walk_tree($heap[0], '', {});
+
+    my %code_lengths;
+    foreach my $i (keys %$freq) {
+        $code_lengths{$i} = length($h->{$i});
+    }
+
+    huffman_from_code_lengths(\%code_lengths);
 }
 
 sub huffman_from_symbols ($symbols) {
@@ -5776,11 +5830,18 @@ The prefix codes are in canonical form, as defined in RFC 1951 (Section 3.2.2).
     my $dict = huffman_from_code_lengths(\@code_lengths);
     my ($dict, $rev_dict) = huffman_from_code_lengths(\@code_lengths);
 
-Low-level function that constructs a dictionary of canonical prefix codes, given an array of code lengths, as defined in RFC 1951 (Section 3.2.2).
+    my $dict = huffman_from_code_lengths(\%code_lengths);
+    my ($dict, $rev_dict) = huffman_from_code_lengths(\%code_lengths);
+
+Low-level function that constructs a dictionary of canonical prefix codes as defined in RFC 1951 (Section 3.2.2), given an array-ref of code lengths or a hash-ref of (symbol => length) values,
 
 It takes a single parameter, C<\@code_lengths>, where entry C<$i> in the array corresponds to the code length for symbol C<$i>.
 
-The function returns two values: C<$dict>, which is the mapping of symbols to Huffman codes, and C<$rev_dict>, which holds the reverse mapping of Huffman codes to symbols.
+Similarily, when a hash-ref table is given, C<\%code_lengths>, keys are the symbols and values are the code lengths. This variant is useful for large symbols.
+
+In list context, the function returns two values: C<$dict>, which is the mapping of symbols to Huffman codes, and C<$rev_dict>, which holds the reverse mapping of Huffman codes to symbols.
+
+In scalar context, it returns only the C<$dict> table.
 
 =head2 huffman_encode
 
