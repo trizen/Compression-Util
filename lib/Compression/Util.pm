@@ -956,8 +956,18 @@ sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
 
     # Schwartzian transform with optimized sorting
     return [
-        map  { $_->[1] }
-        sort { ($a->[0] cmp $b->[0]) || (substr($double_s, $a->[1], $len) cmp substr($double_s, $b->[1], $len)) }
+        map { $_->[1] }
+        sort {
+            ($a->[0] cmp $b->[0])
+              || do {
+                my ($cmp, $s_len);
+                for (my $i = 1 ; ; ++$i) {
+                    $s_len = $LOOKAHEAD_LEN << $i;
+                    ($cmp = substr($double_s, $a->[1], $s_len) cmp substr($double_s, $b->[1], $s_len)) && last;
+                }
+                $cmp;
+            }
+        }
         map {
             my $pos = $_;
             my $end = $pos + $LOOKAHEAD_LEN;
@@ -994,30 +1004,30 @@ sub bwt_encode ($s, $LOOKAHEAD_LEN = 128) {
     return ($ret, $idx);
 }
 
-sub bwt_decode ($bwt, $idx) {    # fast inversion
+sub bwt_decode ($bwt, $idx) {
+    my @L = unpack('C*', $bwt);
+    my $n = scalar @L;
 
-    my @tail = split(//, $bwt);
-    my @head = sort @tail;
+    my @freq = (0) x 256;
+    $freq[$_]++ for @L;
 
-    my %indices;
-    foreach my $i (0 .. $#tail) {
-        push @{$indices{$tail[$i]}}, $i;
+    my @cumul = (0) x 257;
+    $cumul[$_ + 1] = $cumul[$_] + $freq[$_] for 0 .. 255;
+
+    my @next;
+    my @cnt = (0) x 256;
+    for my $i (0 .. $n - 1) {
+        $next[$cumul[$L[$i]] + $cnt[$L[$i]]++] = $i;
     }
 
-    my @table;
-    foreach my $v (@head) {
-        push @table, shift(@{$indices{$v}});
+    my @dec;
+    my $i = $idx;
+    for (1 .. $n) {
+        $i = $next[$i];
+        push @dec, $L[$i];
     }
 
-    my $dec = '';
-    my $i   = $idx;
-
-    for (1 .. scalar(@head)) {
-        $dec .= $head[$i];
-        $i = $table[$i];
-    }
-
-    return $dec;
+    return pack('C*', @dec);
 }
 
 ##############################################
@@ -1865,18 +1875,31 @@ sub huffman_encode ($symbols, $dict) {
     join('', @{$dict}{@$symbols});
 }
 
+sub _build_trie ($rev_dict) {
+    my $root = {};
+    for my $code (keys %$rev_dict) {
+        my $node = $root;
+        for my $bit (split //, $code) {
+            $node->{$bit} //= {};
+            $node = $node->{$bit};
+        }
+        $node->{sym} = $rev_dict->{$code};
+    }
+    return $root;
+}
+
 sub huffman_decode ($bits, $rev_dict) {
-    local $" = '|';
-    [
-     split(
-         ' ', $bits =~ s{(@{[
-        map  { $_->[1] }
-        sort { $a->[0] <=> $b->[0] }
-        map  { [length($_), $_] }
-        keys %$rev_dict]
-    })}{$rev_dict->{$1} }gr
-          )
-    ];
+    my $root = _build_trie($rev_dict);
+    my @result;
+    my $node = $root;
+    foreach my $i (0 .. length($bits) - 1) {
+        $node = $node->{substr($bits, $i, 1)};
+        if (exists $node->{sym}) {
+            push @result, $node->{sym};
+            $node = $root;
+        }
+    }
+    return \@result;
 }
 
 # produce encode and decode dictionary from a tree
@@ -1946,48 +1969,34 @@ sub huffman_from_code_lengths ($code_lengths_table) {
     return (wantarray ? (\%dict, \%rev_dict) : \%dict);
 }
 
-sub _heap_insert ($heap, $node) {
-    push @$heap, $node;
+sub _heap_push ($heap, $item) {
+    push @$heap, $item;
     my $i = $#$heap;
-
-    # Sift Up
     while ($i > 0) {
-        my $p = int(($i - 1) / 2);
+        my $p = ($i - 1) >> 1;
         last if ($heap->[$p][1] <= $heap->[$i][1]);
-        @$heap[$i, $p] = @$heap[$p, $i];
+        @{$heap}[$p, $i] = @{$heap}[$i, $p];
         $i = $p;
     }
 }
 
-sub _heap_extract ($heap) {
-
-    @$heap || return;
-
-    # Swap root with last element and pop
-    my $min  = $heap->[0];
-    my $last = pop @$heap;
-
-    if (@$heap) {
-        $heap->[0] = $last;
-        my $i   = 0;
-        my $cnt = scalar @$heap;
-
-        # Sift Down
-        while (1) {
-            my $c1 = 2 * $i + 1;
-            my $c2 = 2 * $i + 2;
-
-            last if $c1 >= $cnt;
-
-            # Find smaller child
-            my $swap = ($c2 < $cnt && $heap->[$c2][1] < $heap->[$c1][1]) ? $c2 : $c1;
-            last if ($heap->[$i][1] <= $heap->[$swap][1]);
-            @$heap[$i, $swap] = @$heap[$swap, $i];
-            $i = $swap;
-        }
+sub _heap_pop ($heap) {
+    return pop @$heap if (@$heap == 1);
+    my $top = $heap->[0];
+    $heap->[0] = pop @$heap;
+    my $n = scalar @$heap;
+    my $i = 0;
+    while (1) {
+        my $s = $i;
+        my $l = 2 * $i + 1;
+        my $r = $l + 1;
+        $s = $l if ($l < $n && $heap->[$l][1] < $heap->[$s][1]);
+        $s = $r if ($r < $n && $heap->[$r][1] < $heap->[$s][1]);
+        last if $s == $i;
+        @{$heap}[$i, $s] = @{$heap}[$s, $i];
+        $i = $s;
     }
-
-    return $min;
+    return $top;
 }
 
 sub huffman_from_freq($freq) {
@@ -1996,23 +2005,18 @@ sub huffman_from_freq($freq) {
     # Structure: [ [symbol_or_children], frequency ]
     my @heap;
     foreach my $k (sort { $a <=> $b } keys %$freq) {
-        _heap_insert(\@heap, [$k, $freq->{$k}]);
-    }
-
-    # Edge case: only one item
-    if (@heap == 1) {
-        my $item = $heap[0];
-        return huffman_from_code_lengths({$item->[0] => 1});
+        _heap_push(\@heap, [$k, $freq->{$k}]);
     }
 
     # Build Huffman Tree
     while (@heap > 1) {
-        my $x = _heap_extract(\@heap);
-        my $y = _heap_extract(\@heap);
+        my $x = _heap_pop(\@heap);
+        my $y = _heap_pop(\@heap);
+        _heap_push(\@heap, [[$x, $y], $x->[1] + $y->[1]]);
+    }
 
-        # Create new internal node
-        # Content is [child_x, child_y], Frequency is sum
-        _heap_insert(\@heap, [[$x, $y], $x->[1] + $y->[1]]);
+    if (@heap == 1 && !ref $heap[0][0]) {
+        @heap = ([[$heap[0]], $heap[0][1]]);
     }
 
     # Generate Codes
