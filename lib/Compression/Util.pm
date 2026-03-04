@@ -960,7 +960,7 @@ sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
         sort {
             ($a->[0] cmp $b->[0])
               || do {
-                my ($cmp, $s_len) = (0, $LOOKAHEAD_LEN << 1);
+                my ($cmp, $s_len) = (0, $LOOKAHEAD_LEN << 2);
                 while (1) {
                     ($cmp = substr($double_s, $a->[1], $s_len) cmp substr($double_s, $b->[1], $s_len)) && last;
                     $s_len <<= 1;
@@ -2569,9 +2569,9 @@ sub lzss_decode ($literals, $distances, $lengths) {
             $data .= substr($data, -1) x $length;
         }
         else {                     # overlapping matches
-            foreach my $i (1 .. $length) {
-                $data .= substr($data, $data_len + $i - $dist - 1, 1) // confess "bad input";
-            }
+            my $pattern   = substr($data, $data_len - $dist, $dist) // confess "bad input";
+            my $full_reps = int(($length + $dist - 1) / $dist) + 1;
+            $data .= substr($pattern x $full_reps, 0, $length) // confess "bad input";
         }
 
         $data_len += $length;
