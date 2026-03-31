@@ -9,7 +9,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 
-our $VERSION = '0.15';
+our $VERSION = '0.16';
 our $VERBOSE = 0;        # verbose mode
 
 our $LZ_MIN_LEN       = 4;          # minimum match length in LZ parsing
@@ -6173,7 +6173,7 @@ Please report any bugs or feature requests to: L<https://github.com/trizen/Compr
 
 =head1 AUTHOR
 
-Daniel "Trizen" Șuteu  C<< <trizen@cpan.org> >>
+Daniel "Trizen" Șuteu
 
 =head1 ACKNOWLEDGEMENTS
 
