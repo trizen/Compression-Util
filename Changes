@@ -1,6 +1,6 @@
 Revision history for Compression-Util
 
-0.17    2026-??-??
+0.17    2026-08-11
 
         [ADDITIONS]
 
@@ -13,7 +13,7 @@ Revision history for Compression-Util
 
         [FIXES]
 
-        - Fixed `bwt_sort_symbolic()`: it could hang indefinitely on cyclic patterns, such "ABCABC".
+        - Fixed `bwt_sort_symbolic()`: it could hang indefinitely on cyclic patterns, such as "ABCABC".
 
 0.16    2026-03-31
 
