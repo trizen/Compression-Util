@@ -11,6 +11,10 @@ Revision history for Compression-Util
 
         - Improved LZ encoding for certain inputs, by preferring earlier matches.
 
+        [FIXES]
+
+        - Fixed `bwt_sort_symbolic()`: it could hang indefinitely on cyclic patterns, such "ABCABC".
+
 0.16    2026-03-31
 
         [IMPROVEMENTS]

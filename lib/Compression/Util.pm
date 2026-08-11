@@ -1036,33 +1036,34 @@ sub bwt_decode ($bwt, $idx) {
 # Burrows-Wheeler transform (symbolic variant)
 ##############################################
 
-sub bwt_sort_symbolic ($s) {    # O(n) space (slowish)
-
+sub bwt_sort_symbolic ($s) {    # O(n * log(n)^2)
     my @cyclic = @$s;
     my $len    = scalar(@cyclic);
+    return [0 .. $len - 1] if $len <= 1;
 
-    my $rle = 1;
-    foreach my $i (1 .. $len - 1) {
-        if ($cyclic[$i] != $cyclic[$i - 1]) {
-            $rle = 0;
-            last;
+    my @rank = @cyclic;
+    my @sa   = (0 .. $len - 1);
+    my $k    = 1;
+
+    while (1) {
+        my @tmp_rank = @rank;
+        @sa = sort { $tmp_rank[$a] <=> $tmp_rank[$b] || $tmp_rank[($a + $k) % $len] <=> $tmp_rank[($b + $k) % $len] } @sa;
+
+        my @new_rank;
+        $new_rank[$sa[0]] = 0;
+        for my $i (1 .. $#sa) {
+            my ($prev, $cur) = ($sa[$i - 1], $sa[$i]);
+            my $same = ($tmp_rank[$prev] == $tmp_rank[$cur])
+              && ($tmp_rank[($prev + $k) % $len] == $tmp_rank[($cur + $k) % $len]);
+            $new_rank[$cur] = $new_rank[$prev] + ($same ? 0 : 1);
         }
+        @rank = @new_rank;
+
+        last if $rank[$sa[-1]] == $len - 1;    # all ranks distinct — done
+        last if $k >= $len;                    # full cycle covered — remaining ties are truly equal
+        $k *= 2;
     }
-
-    $rle && return [0 .. $len - 1];
-
-    [
-     sort {
-         my ($i, $j) = ($a, $b);
-
-         while ($cyclic[$i] == $cyclic[$j]) {
-             $i %= $len if (++$i >= $len);
-             $j %= $len if (++$j >= $len);
-         }
-
-         $cyclic[$i] <=> $cyclic[$j];
-       } 0 .. $len - 1
-    ];
+    return \@sa;
 }
 
 sub bwt_encode_symbolic ($symbols) {
