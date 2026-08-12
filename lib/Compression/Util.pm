@@ -277,27 +277,21 @@ sub int2bytes_lsb ($value, $size) {
     pack('b*', scalar reverse sprintf("%0*b", 8 * $size, $value));
 }
 
-sub bytes2int($fh, $n) {
-
+sub bytes2int ($fh, $n) {
     if (ref($fh) eq '') {
         open(my $fh2, '<:raw', \$fh) or confess "error: $!";
         return __SUB__->($fh2, $n);
     }
-
-    my $bytes = '';
-    $bytes .= getc($fh) for (1 .. $n);
+    read($fh, my $bytes, $n) == $n or confess "truncated read: expected $n bytes";
     oct('0b' . unpack('B*', $bytes));
 }
 
 sub bytes2int_lsb ($fh, $n) {
-
     if (ref($fh) eq '') {
         open(my $fh2, '<:raw', \$fh) or confess "error: $!";
         return __SUB__->($fh2, $n);
     }
-
-    my $bytes = '';
-    $bytes .= getc($fh) for (1 .. $n);
+    read($fh, my $bytes, $n) == $n or confess "truncated read: expected $n bytes";
     oct('0b' . reverse unpack('b*', $bytes));
 }
 
@@ -336,12 +330,9 @@ sub symbols2string ($symbols) {
 }
 
 sub read_null_terminated ($fh) {
-    my $string = '';
-    while (1) {
-        my $c = getc($fh) // confess "can't read character";
-        last if $c eq "\0";
-        $string .= $c;
-    }
+    local $/ = "\0";
+    my $string = <$fh> // confess "can't read string";
+    chop($string);
     return $string;
 }
 
