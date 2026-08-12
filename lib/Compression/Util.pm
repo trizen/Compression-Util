@@ -944,8 +944,14 @@ sub binary_vrl_decode ($bitstring) {
 ############################
 
 sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
-    my $len      = length($s);
-    my $double_s = $s . $s;                  # Pre-compute doubled string
+    my $len = length($s);
+
+    return [0 .. $len - 1] if $len <= 1;
+
+    # Fast-path for uniform strings ("A" x 10000)
+    return [0 .. $len - 1] if $s =~ /^(.)\1*\z/s;
+
+    my $double_s = $s . $s;    # Pre-compute doubled string
 
     # Schwartzian transform with optimized tie-breaking
     return [
@@ -956,7 +962,7 @@ sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
                 my $p1     = $a->[1];
                 my $p2     = $b->[1];
                 my $offset = $LOOKAHEAD_LEN;
-                my $chunk  = $LOOKAHEAD_LEN << 1;
+                my $chunk  = $LOOKAHEAD_LEN << 5;
                 my $cmp    = 0;
 
                 # Compare remaining characters in exponentially growing chunks
