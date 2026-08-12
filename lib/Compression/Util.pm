@@ -3315,17 +3315,24 @@ sub crc32($str, $crc = 0) {
     return (($crc & 0xffffffff) ^ 0xffffffff);
 }
 
-sub adler32($str, $adler = 1) {
+use constant ADLER_NMAX => 5552;
 
-    # Reference:
-    #   https://datatracker.ietf.org/doc/html/rfc1950#section-9
-
+sub adler32 ($str, $adler = 1) {
     my $s1 = $adler & 0xffff;
     my $s2 = ($adler >> 16) & 0xffff;
 
-    foreach my $c (unpack('C*', $str)) {
-        $s1 = ($s1 + $c) % 65521;
-        $s2 = ($s2 + $s1) % 65521;
+    my $len = length($str);
+    my $pos = 0;
+    while ($len > 0) {
+        my $k = $len < ADLER_NMAX ? $len : ADLER_NMAX;
+        $len -= $k;
+        foreach my $c (unpack('C*', substr($str, $pos, $k))) {
+            $s1 += $c;
+            $s2 += $s1;
+        }
+        $pos += $k;
+        $s1 %= 65521;
+        $s2 %= 65521;
     }
     return (($s2 << 16) + $s1);
 }
