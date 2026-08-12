@@ -947,18 +947,33 @@ sub bwt_sort ($s, $LOOKAHEAD_LEN = 128) {    # O(n * LOOKAHEAD_LEN) space (fast)
     my $len      = length($s);
     my $double_s = $s . $s;                  # Pre-compute doubled string
 
-    # Schwartzian transform with optimized sorting
+    # Schwartzian transform with optimized tie-breaking
     return [
         map { $_->[1] }
         sort {
             ($a->[0] cmp $b->[0])
               || do {
-                my ($cmp, $s_len) = (0, $LOOKAHEAD_LEN << 2);
-                while (1) {
-                    ($cmp = substr($double_s, $a->[1], $s_len) cmp substr($double_s, $b->[1], $s_len)) && last;
-                    $s_len <<= 1;
+                my $p1     = $a->[1];
+                my $p2     = $b->[1];
+                my $offset = $LOOKAHEAD_LEN;
+                my $chunk  = $LOOKAHEAD_LEN << 1;
+                my $cmp    = 0;
+
+                # Compare remaining characters in exponentially growing chunks
+                while ($offset < $len) {
+                    my $rem        = $len - $offset;
+                    my $curr_chunk = ($chunk < $rem) ? $chunk : $rem;
+
+                    $cmp = substr($double_s, $p1 + $offset, $curr_chunk) cmp substr($double_s, $p2 + $offset, $curr_chunk);
+
+                    last if $cmp;
+
+                    $offset += $curr_chunk;
+                    $chunk <<= 1;
                 }
-                $cmp;
+
+                # If identical up to string length, tie-break by index for stability
+                $cmp || ($p1 <=> $p2);
             }
         }
         map {
