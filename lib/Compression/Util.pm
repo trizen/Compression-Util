@@ -4134,9 +4134,9 @@ sub _deflate_decode_huffman($in_fh, $buffer, $rev_dict, $dist_rev_dict, $search_
                     $$search_window .= substr($$search_window, length($$search_window) - $dist, $length);
                 }
                 else {                        # overlapping matches
-                    foreach my $i (1 .. $length) {
-                        $$search_window .= substr($$search_window, length($$search_window) - $dist, 1);
-                    }
+                    my $pattern   = substr($$search_window, length($$search_window) - $dist, $dist);
+                    my $full_reps = int(($length + $dist - 1) / $dist) + 1;
+                    $$search_window .= substr($pattern x $full_reps, 0, $length);
                 }
 
                 $data .= substr($$search_window, -$length);
