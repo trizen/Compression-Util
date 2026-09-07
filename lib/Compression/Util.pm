@@ -127,7 +127,6 @@ our %EXPORT_TAGS = (
           deflate_decode
 
           lzss_encode
-          lzss_encode_hash4
           lzss_encode_fast
           lzss_encode_fast_symbolic
           lzss_decode
@@ -2746,7 +2745,7 @@ sub lzss_decode ($literals, $distances, $lengths) {
         }
         else {                     # overlapping matches
             my $pattern   = substr($data, $data_len - $dist, $dist) // confess "bad input";
-            my $full_reps = int(($length + $dist - 1) / $dist) + 1;
+            my $full_reps = int(($length + $dist - 1) / $dist);
             $data .= substr($pattern x $full_reps, 0, $length) // confess "bad input";
         }
 
@@ -2889,82 +2888,6 @@ sub lzss_encode_fast($str, %params) {
     return (\@literals, \@distances, \@lengths);
 }
 
-##################################################################
-# LZSS encoding via O(1) flat-array hashing, LZ4-style.
-##################################################################
-
-sub lzss_encode_hash4 ($str, %params) {
-
-    state $LZ4_HASH_BITS = 16;            # hash table has 2**this slots
-    state $LZ4_HASH_MUL  = 0x9E3779B1;    # Fibonacci hashing multiplier, scrambles the 4-byte window's bits
-
-    if (ref($str) ne '') {
-        confess "lzss_encode_hash4: symbolic-array input isn't supported (fixed 4-byte hashing needs a byte string)";
-    }
-
-    my $min_len  = 4;
-    my $max_len  = $params{max_len}  // $LZ_MAX_LEN;
-    my $max_dist = $params{max_dist} // $LZ_MAX_DIST;
-
-    my @symbols = unpack('C*', $str);
-
-    my $end = $#symbols;
-    my (@literals, @distances, @lengths);
-
-    if ($end + 1 < $min_len) {    # fewer than 4 bytes total: nothing to hash, every byte is a literal
-        for my $la (0 .. $end) {
-            push @lengths,   0;
-            push @distances, 0;
-            push @literals,  $symbols[$la];
-        }
-        return (\@literals, \@distances, \@lengths);
-    }
-
-    my $hash_size = 1 << $LZ4_HASH_BITS;
-    my @hash_table;
-
-    my $shift = 32 - $LZ4_HASH_BITS;
-    my $la    = 0;
-
-    while ($la + $min_len - 1 <= $end) {
-
-        my $seq = substr($str, $la, 4);
-        my $val = unpack('N', $seq);
-        my $h   = (($val * $LZ4_HASH_MUL) & 0xFFFFFFFF) >> $shift;
-
-        my $p = $hash_table[$h];
-        $hash_table[$h] = $la;
-
-        if (defined($p) and $la - $p <= $max_dist and substr($str, $p, $min_len) eq $seq) {
-
-            my $n = $min_len;
-
-            ++$n while ($la + $n <= $end and $symbols[$la + $n - 1] == $symbols[$p + $n - 1] and $n <= $max_len);
-
-            push @lengths,   $n - 1;
-            push @distances, $la - $p;
-            push @literals,  undef;
-
-            $la += $n - 1;    # the "jump": intermediate match bytes are never indexed
-            next;
-        }
-
-        push @lengths,   0;
-        push @distances, 0;
-        push @literals,  $symbols[$la];
-        $la++;
-    }
-
-    while ($la <= $end) {    # trailing <4 bytes: no room left to hash, always literals
-        push @lengths,   0;
-        push @distances, 0;
-        push @literals,  $symbols[$la];
-        $la++;
-    }
-
-    return (\@literals, \@distances, \@lengths);
-}
-
 ################################
 # LZ77 encoding, inspired by LZ4
 ################################
@@ -3062,9 +2985,9 @@ sub lz77_decode($symbols, $dist_symbols, $len_symbols, $match_symbols) {
             $data .= substr($data, -1) x $match_len;
         }
         else {                        # overlapping matches
-            foreach my $i (1 .. $match_len) {
-                $data .= substr($data, $data_len + $i - $dist - 1, 1) // confess "bad input";
-            }
+            my $pattern   = substr($data, $data_len - $dist, $dist) // confess "bad input";
+            my $full_reps = int(($match_len + $dist - 1) / $dist);
+            $data .= substr($pattern x $full_reps, 0, $match_len) // confess "bad input";
         }
 
         $data_len += $match_len;
@@ -3296,15 +3219,15 @@ sub lzb_decompress($fh) {
         my $offset = oct('0b' . unpack('B*', substr($block, 0, 2, '')));
 
         if ($offset >= $match_len) {    # non-overlapping matches
-            $search_window .= substr($search_window, length($search_window) - $offset, $match_len);
+            $search_window .= substr($search_window, length($search_window) - $offset, $match_len) // confess "bad input";
         }
         elsif ($offset == 1) {          # run-length of last character
             $search_window .= substr($search_window, -1) x $match_len;
         }
         else {                          # overlapping matches
-            foreach my $i (1 .. $match_len) {
-                $search_window .= substr($search_window, length($search_window) - $offset, 1);
-            }
+            my $pattern   = substr($search_window, length($search_window) - $offset, $offset) // confess "bad input";
+            my $full_reps = int(($match_len + $offset - 1) / $offset);
+            $search_window .= substr($pattern x $full_reps, 0, $match_len) // confess "bad input";
         }
 
         $data .= substr($search_window, -($match_len + $literals_length));
@@ -4235,7 +4158,8 @@ sub _deflate_decode_huffman($in_fh, $buffer, $rev_dict, $dist_rev_dict, $search_
     my $max_dist_code_len = max(map { length($_) } keys %$dist_rev_dict);
 
     while (1) {
-        $code .= read_bit_lsb($in_fh, $buffer);
+        if ($$buffer eq '') { $$buffer = unpack('B*', getc($in_fh) // confess "can't read bit"); }
+        $code .= chop($$buffer);
 
         if (length($code) > $max_ll_code_len) {
             confess "[!] Something went wrong: length of LL code `$code` is > $max_ll_code_len.";
@@ -4260,7 +4184,8 @@ sub _deflate_decode_huffman($in_fh, $buffer, $rev_dict, $dist_rev_dict, $search_
                 my $dist_code = '';
 
                 while (1) {
-                    $dist_code .= read_bit_lsb($in_fh, $buffer);
+                    if ($$buffer eq '') { $$buffer = unpack('B*', getc($in_fh) // confess "can't read bit"); }
+                    $dist_code .= chop($$buffer);
 
                     if (length($dist_code) > $max_dist_code_len) {
                         confess "[!] Something went wrong: length of distance code `$dist_code` is > $max_dist_code_len.";
@@ -4274,16 +4199,16 @@ sub _deflate_decode_huffman($in_fh, $buffer, $rev_dict, $dist_rev_dict, $search_
                 my ($dist, $dist_bits) = @{$DISTANCE_SYMBOLS->[$dist_rev_dict->{$dist_code} + 1]};
                 $dist += bits2int_lsb($in_fh, $dist_bits, $buffer) if ($dist_bits > 0);
 
-                if ($dist == 1) {
+                if ($dist >= $length) {    # non-overlapping matches
+                    $$search_window .= substr($$search_window, length($$search_window) - $dist, $length) // confess "bad input";
+                }
+                elsif ($dist == 1) {
                     $$search_window .= substr($$search_window, -1) x $length;
                 }
-                elsif ($dist >= $length) {    # non-overlapping matches
-                    $$search_window .= substr($$search_window, length($$search_window) - $dist, $length);
-                }
-                else {                        # overlapping matches
-                    my $pattern   = substr($$search_window, length($$search_window) - $dist, $dist);
-                    my $full_reps = int(($length + $dist - 1) / $dist) + 1;
-                    $$search_window .= substr($pattern x $full_reps, 0, $length);
+                else {                     # overlapping matches
+                    my $pattern   = substr($$search_window, length($$search_window) - $dist, $dist) // confess "bad input";
+                    my $full_reps = int(($length + $dist - 1) / $dist);
+                    $$search_window .= substr($pattern x $full_reps, 0, $length) // confess "bad input";
                 }
 
                 $data .= substr($$search_window, -$length);
@@ -4946,15 +4871,15 @@ sub lz4_decompress($fh) {
                     ## say STDERR "Total match len: $match_len\n";
 
                     if ($offset >= $match_len) {    # non-overlapping matches
-                        $decoded .= substr($decoded, length($decoded) - $offset, $match_len);
+                        $decoded .= substr($decoded, length($decoded) - $offset, $match_len) // confess "bad input";
                     }
                     elsif ($offset == 1) {
                         $decoded .= substr($decoded, -1) x $match_len;
                     }
                     else {                          # overlapping matches
-                        foreach my $i (1 .. $match_len) {
-                            $decoded .= substr($decoded, length($decoded) - $offset, 1);
-                        }
+                        my $pattern   = substr($decoded, length($decoded) - $offset, $offset) // confess "bad input";
+                        my $full_reps = int(($match_len + $offset - 1) / $offset);
+                        $decoded .= substr($pattern x $full_reps, 0, $match_len) // confess "bad input";
                     }
                 }
             }

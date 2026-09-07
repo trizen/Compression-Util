@@ -16,6 +16,11 @@ Revision history for Compression-Util
         - Slightly faster `adler32` (1.2x faster).
         - Better performance in `bwt_sort` for highly repetitive patterns.
         - Better performance in `bytes2int`, `bytes2int_lsb` and `read_null_terminated`.
+        - Faster LZSS/LZ77 decoding for overlapping matches.
+
+        [CHANGES]
+
+        - Removed the `lzss_encode_hash4()` function. Use `lzss_encode_fast()` instead!
 
 0.17    2026-08-11
 

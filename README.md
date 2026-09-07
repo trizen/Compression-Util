@@ -240,7 +240,7 @@ Minimum length of a match in LZ parsing. The value must be an integer greater th
 
 By default, `$LZ_MIN_LEN` is set to `4`.
 
-**NOTE:** for `lzss_encode_fast()` is recommended to set `$LZ_MIN_LEN = 5`, which will result in slightly better compression ratio. `lzss_encode_hash4()` always uses a fixed minimum match length of `4`, ignoring this variable.
+**NOTE:** for `lzss_encode_fast()` is recommended to set `$LZ_MIN_LEN = 5`, which will result in slightly better compression ratio.
 
 ## 📏 `$LZ_MAX_LEN`
 
@@ -280,7 +280,6 @@ The module ships three LZ-parsing engines with different speed/ratio trade-offs,
 
     lzss_encode()             # best compression; honors all $LZ_* tuning variables
     lzss_encode_fast()        # faster, chain length fixed to 1; good with $LZ_MIN_LEN = 5
-    lzss_encode_hash4()       # fastest, LZ4-style O(1) hashing; bytes only, min match fixed to 4
 
 Any of these can be plugged into the higher-level compressors (`lz77_compress()`, `lzss_compress()`, `lzb_compress()`, `lz4_compress()`, `gzip_compress()`, `zlib_compress()`) via their optional `$lzss_encoding_sub` argument, so the trade-off can be tuned per call without touching the rest of the pipeline.
 
@@ -454,8 +453,6 @@ Bit/byte I/O primitives, raw LZ parsing, Huffman table construction, and DEFLATE
 
     lzss_encode_fast($string)                # Fast-LZSS encoding into literals, distances and lengths
     lzss_encode_fast_symbolic(\@symbols)     # Fast-LZSS encoding into literals, distances and lengths (symbolic)
-
-    lzss_encode_hash4($string)               # LZSS encoding via O(1) flat-array hashing, LZ4-style.
 
     lzss_decode(\@lits, \@dist, \@lens)          # Inverse of lzss_encode() and lzss_encode_fast()
     lzss_decode_symbolic(\@lits, \@dist, \@lens) # Inverse of lzss_encode_symbolic() and lzss_encode_fast_symbolic()
@@ -1367,7 +1364,7 @@ Inverse of `lz77_encode()` and `lz77_encode_symbolic()`, respectively.
     my ($literals, $distances, $lengths) = lzss_encode_fast($data, %params);
     my ($literals, $distances, $lengths) = lzss_encode_fast(\@symbols, %params);
 
-Low-level function that applies the LZSS (Lempel-Ziv-Storer-Szymanski) algorithm on the provided data. See ["CHOOSING AN LZSS ENCODER"](choosing-an-lzss-encoder) for how this compares to `lzss_encode_fast()` and `lzss_encode_hash4()`.
+Low-level function that applies the LZSS (Lempel-Ziv-Storer-Szymanski) algorithm on the provided data. See ["CHOOSING AN LZSS ENCODER"](choosing-an-lzss-encoder) for how this compares to `lzss_encode_fast()`.
 
 The accepted `%params` are:
 
@@ -1386,29 +1383,6 @@ The function returns three values:
 
 The output can be decoded with `lzss_decode()` and `lzss_decode_symbolic()`, respectively.
 
-## lzss_encode_hash4
-
-    my ($literals, $distances, $lengths) = lzss_encode_hash4($data, %params);
-
-Low-level function that applies a fast LZSS compression algorithm using a fixed 4-byte hash window and an O(1) flat-array hash table.
-
-Unlike `lzss_encode_fast()`, it uses integer hashing instead of string keys and skips indexing the bytes covered by a match, providing an LZ4-style performance trade-off (fastest of the three encoders, at some cost to compression ratio).
-
-The accepted `%params` are:
-
-    max_len     => $LZ_MAX_LEN,
-    max_dist    => $LZ_MAX_DIST,
-
-The minimum match length is fixed at 4 bytes and is not configurable. Symbolic-array input is not supported -- only plain byte strings.
-
-The function returns three values:
-
-    $literals   # array-ref of uncompressed bytes
-    $distances  # array-ref of back-reference distances
-    $lengths    # array-ref of match lengths
-
-The output can be decoded with `lzss_decode()`.
-
 ## lzss_decode / lzss_decode_symbolic
 
     my $string  = lzss_decode(\@literals, \@distances, \@lengths);
@@ -1416,7 +1390,7 @@ The output can be decoded with `lzss_decode()`.
 
 Low-level function that decodes the LZSS encoding, using the provided literals, distances, and lengths of matched sub-strings.
 
-Inverse of `lzss_encode()`, `lzss_encode_fast()`, and `lzss_encode_hash4()` (all three produce output in the same `($literals, $distances, $lengths)` shape).
+Inverse of `lzss_encode()` and `lzss_encode_fast()` (both produce output in the same `($literals, $distances, $lengths)` shape).
 
 ## deflate_encode
 
@@ -1424,7 +1398,7 @@ Inverse of `lzss_encode()`, `lzss_encode_fast()`, and `lzss_encode_hash4()` (all
     my $string = deflate_encode(\@literals, \@distances, \@lengths);
     my $string = deflate_encode(\@literals, \@distances, \@lengths, \&create_ac_entry);
 
-Low-level function that encodes the results returned by `lzss_encode()`, `lzss_encode_fast()`, or `lzss_encode_hash4()`, using a DEFLATE-like approach, combined with Huffman coding by default (or the given `$entropy_sub`).
+Low-level function that encodes the results returned by `lzss_encode()` or `lzss_encode_fast()`, using a DEFLATE-like approach, combined with Huffman coding by default (or the given `$entropy_sub`).
 
 ## deflate_decode
 
@@ -1647,9 +1621,6 @@ Adaptive Arithmetic Coding avoids storing an explicit frequency table, which ten
         local $Compression::Util::LZ_MAX_CHAIN_LEN = 128;
         my $tight_enc = lzss_compress($data);
     }
-
-    # Fastest possible: LZ4-style O(1) hashing
-    my $quick_enc = lzss_compress($data, \&create_huffman_entry, \&lzss_encode_hash4);
 
 <a id="references"></a>
 
