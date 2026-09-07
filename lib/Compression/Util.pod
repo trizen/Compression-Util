@@ -295,6 +295,12 @@ Ready-made compressors and decompressors, each wrapping a full pipeline of trans
       lz4_compress($string)                # Compress a given string using the LZ4 frame format
       lz4_decompress($fh)                  # Inverse of the above method
 
+      detect_format($fh)                   # Sniffs the magic bytes of a compressed blob
+      decompress_auto($fh)                 # Decompresses a blob produced by GZIP, ZLIB, BZIP2 or LZ4
+
+      best_compress($data)                 # Compresses $data using several methods, optimizing for best size
+      best_decompress($data)               # Inverse of the above method
+
 =head1 MEDIUM-LEVEL FUNCTIONS
 
 Individual transforms and entropy coders, meant to be composed together into your own pipeline (as the L</HIGH-LEVEL FUNCTIONS> do internally).
@@ -326,6 +332,12 @@ Individual transforms and entropy coders, meant to be composed together into you
       bwt_encode_symbolic(\@symbols)       # Burrows-Wheeler transform over an array-ref of symbols
       bwt_decode_symbolic(\@bwt, $idx)     # Inverse of symbolic Burrows-Wheeler transform
 
+      golomb_rice_encode(\@symbols)        # Encodes a sequence of symbols using Golomb-Rice coding
+      golomb_rice_decode($fh)              # Inverse of the above method
+
+      leb128_encode(\@symbols)             # Encodes a sequence of symbols using unsigned LEB128 (Little Endian Base 128)
+      leb128_decode($fh)                   # Inverse of the above method
+
       mtf_encode(\@symbols)                # Move-to-front transform
       mtf_decode(\@mtf, \@alphabet)        # Inverse of the above method
 
@@ -336,6 +348,7 @@ Individual transforms and entropy coders, meant to be composed together into you
       decode_alphabet_256($fh)             # Inverse of the above method
 
       frequencies(\@symbols)               # Returns a dictionary with symbol frequencies
+      shannon_entropy(\@symbols)           # Computes the (zeroth-order) Shannon entropy of a sequence of symbols
       run_length(\@symbols, $max=undef)    # Run-length encoding, returning a 2D array-ref
 
       rle4_encode(\@symbols, $max=255)     # Run-length encoding with 4 or more consecutive characters
@@ -719,6 +732,69 @@ It accepts either a string or an arbitrary array-ref of non-negative integer val
 
 Inverse of C<mrl_compress()> and C<mrl_compress_symbolic()>.
 
+=head2 detect_format
+
+    my $format = detect_format($string);
+    my $format = detect_format($fh);
+
+Sniffs the magic bytes of a compressed blob (or the next few bytes of a filehandle) and returns one of C<"gzip">, C<"zlib">, C<"bzip2">, C<"lz4">, or C<undef> if none of the four is recognized.
+
+Given a filehandle, C<detect_format()> peeks at the first 4 bytes and seeks back, leaving the filehandle's position unchanged -- so it is safe to call before handing the same filehandle to C<gzip_decompress()>, C<zlib_decompress()>, and so on (this is exactly what C<decompress_auto()> does internally). The filehandle must support C<seek()> (a real file or an in-memory string filehandle both do; a pipe or socket does not).
+
+Detection for gzip, bzip2 and lz4 is exact (each format has a fixed, unambiguous magic number). Zlib streams have no dedicated magic number by design of the format, so detection there is a validity check on the header's checksum bits (RFC 1950, section 2.2) -- reliable in practice, but with an intrinsic (very small, roughly 1-in-500) false-positive rate on arbitrary non-zlib data, which is a property of the zlib format itself rather than of this function.
+
+Note this only recognizes the four self-describing container formats above; it has no way to distinguish this module's own C<bwt_compress()>/C<mrl_compress()> output (which carries no format signature) from arbitrary binary data. See C<best_compress()> below if you need to auto-detect between this module's own compression methods.
+
+=cut
+
+=head2 decompress_auto
+
+    my $data = decompress_auto($string);
+    my $data = decompress_auto($fh);
+
+Decompresses a blob produced by (real) C<gzip>, C<zlib>, C<bzip2>, or C<lz4> -- or by this module's own C<gzip_compress()>/C<zlib_compress()>/C<bzip2_compress()>/C<lz4_compress()> -- without the caller needing to know in advance which of the four it is. Internally calls C<detect_format()> and dispatches to the matching C<*_decompress()> function; dies if the format isn't recognized.
+
+Example:
+
+    # Anywhere upstream, some file may have been compressed with any tool:
+    my $data = decompress_auto($fh);
+
+=cut
+
+=head2 best_compress
+
+    my $string = best_compress($data);
+    my $string = best_compress($data, \@methods);
+
+Compresses C<$data> using several methods and keeps whichever produced the smallest output, prefixed with a single-character tag identifying which method won (so C<best_decompress()> knows how to reverse it).
+
+By default, three of this module's own high-level compressors are tried: C<gzip_compress()> (tag C<"G">), C<bwt_compress()> (tag C<"B">), and C<mrl_compress()> (tag C<"M">) -- deliberately three different algorithm families (LZ77/LZSS, BWT+MTF, MTF-only), so that at least one tends to do reasonably well regardless of what kind of redundancy the input has. This costs roughly the sum of all three methods' compression time; it is meant for cases where compression happens once (or offline) and is read many times, not for a hot path where compression speed matters as much as ratio.
+
+The default set can be overridden with C<\@methods>, an array-ref of C<[$tag, $compress_sub]> pairs, where C<$tag> is a single character and C<$compress_sub> is a code-ref taking the same single argument C<best_compress()> itself received (a string, or whatever C<$compress_sub> accepts). If you do this, pass a matching tag-to-decompressor mapping to C<best_decompress()> (see below), since its own default set only understands C<"G">/C<"B">/C<"M">.
+
+Example:
+
+    my $enc = best_compress($data);
+    say best_decompress($enc) eq $data;    # true
+
+    # Restrict the race to two fast methods:
+    my $enc2 = best_compress($data, [
+        ['M', \&mrl_compress],
+        ['L', \&lzss_compress],
+    ]);
+
+=head2 best_decompress
+
+    my $data = best_decompress($fh);
+    my $data = best_decompress($string);
+    my $data = best_decompress($fh, \%methods);
+
+Inverse of C<best_compress()>. Reads the single-character method tag and dispatches to the corresponding decompressor.
+
+The default C<%methods> mapping (C<< G => \&gzip_decompress, B => \&bwt_decompress, M => \&mrl_decompress >>) matches C<best_compress()>'s default set. If C<best_compress()> was called with a custom C<\@methods> list, pass the corresponding C<{tag => $decompress_sub}> hash-ref here as well.
+
+=cut
+
 =head1 INTERFACE FOR MEDIUM-LEVEL FUNCTIONS
 
 =head2 frequencies
@@ -728,6 +804,26 @@ Inverse of C<mrl_compress()> and C<mrl_compress_symbolic()>.
 Returns a hash-ref dictionary with frequencies, given an array-ref of symbols. For example:
 
     frequencies([65, 65, 66, 65, 67]);   # { 65 => 3, 66 => 1, 67 => 1 }
+
+=head2 shannon_entropy
+
+    my $bits_per_symbol = shannon_entropy(\@symbols);
+
+Computes the (zeroth-order) Shannon entropy of a sequence of symbols, in bits per symbol, based on the empirical frequency of each distinct symbol in C<\@symbols> (via C<frequencies()>).
+
+This is the information-theoretic lower bound on the average code length any symbol-by-symbol entropy coder (Huffman coding, arithmetic coding) could achieve on this data, ignoring any structure a transform like BWT or LZ parsing might expose beforehand. It's useful for deciding whether an entropy-coding stage is worth its overhead at all, for comparing how much a preprocessing transform (MTF, delta, BWT) has "flattened" the distribution, or for estimating a theoretical best-case compressed size before actually running a coder.
+
+Returns C<0> for an empty array-ref or when every symbol is identical.
+
+Example:
+
+    shannon_entropy([0,1,0,1,0,1]);         # 1.0 -- one fair coin flip per symbol
+    shannon_entropy([5,5,5,5,5]);           # 0.0 -- no information at all
+    shannon_entropy(string2symbols($text)); # bits/byte of the raw text
+
+    # Multiply by the symbol count for a total-bits estimate:
+    my $symbols   = string2symbols($data);
+    my $est_bytes = shannon_entropy($symbols) * scalar(@$symbols) / 8;
 
 =head2 deltas
 
@@ -830,6 +926,54 @@ This method is particularly effective in encoding a sequence of integers that ar
     my $symbols = abc_decode($string);
 
 Inverse of C<abc_encode()>.
+
+=head2 golomb_rice_encode
+
+    my $string = golomb_rice_encode(\@integers);
+    my $string = golomb_rice_encode(\@integers, $k);
+
+Encodes a sequence of non-negative integers using Golomb-Rice coding, returning a binary string.
+
+Golomb-Rice coding splits each integer C<n> into a quotient C<n E<gt>E<gt> k> (stored in unary) and a remainder C<n & (2**k - 1)> (stored in C<$k> fixed bits). It is near-optimal for geometrically-distributed data -- residuals from a predictor, run lengths, gaps between sorted values -- and is the entropy coder used by FLAC and many other lossless audio/image formats for exactly that reason.
+
+If C<$k> is omitted, it is chosen automatically from the mean of C<\@integers> using the standard approximation for geometric sources. Passing C<$k> explicitly skips this estimate, which is useful when you already know (or want to fix) the distribution's scale, or when encoding many small sequences drawn from the same distribution and want a single shared C<$k> instead of paying for a per-call estimate.
+
+Unlike C<elias_gamma_encode()>/C<elias_omega_encode()>, which are parameter-free but assume small values are far more likely than large ones, Golomb-Rice coding is tunable to the actual scale of the data, and generally compresses geometric/Laplacian-ish data more tightly once C<$k> is well chosen.
+
+Example:
+
+    my @residuals = (0, 1, 0, 2, 0, 0, 1, 3, 0, 1, 0, 0, 2, 1, 0);
+    my $enc = golomb_rice_encode(\@residuals);
+    golomb_rice_decode($enc);    # \@residuals
+
+=head2 golomb_rice_decode
+
+    my $integers = golomb_rice_decode($fh);
+    my $integers = golomb_rice_decode($string);
+
+Inverse of C<golomb_rice_encode()>. The array length and the C<$k> parameter used at encoding time are both stored in the stream (via C<elias_omega_encode()>), so nothing besides the encoded string/filehandle needs to be supplied.
+
+=head2 leb128_encode
+
+    my $string = leb128_encode(\@integers);
+
+Encodes a sequence of non-negative integers using unsigned LEB128 (Little Endian Base 128), the same variable-length byte encoding used by protobuf, WebAssembly, DWARF, and the Git packfile format. Each integer is split into 7-bit groups, least-significant group first; every byte but the last has its high bit set as a continuation marker.
+
+Being byte-aligned rather than bit-aligned, LEB128 is both faster to decode than any of the bit-level codes in this module (C<fibonacci_encode()>, C<elias_gamma_encode()>, C<golomb_rice_encode()>, ...) and produces output compatible with other LEB128 implementations -- useful when the priority is decode speed or interop rather than the tightest possible ratio. For small values it is also reasonably compact: any value below 128 costs exactly one byte.
+
+As with C<fibonacci_encode()> and the Elias coders, the array length is stored as the first encoded value, so C<leb128_decode()> is fully self-contained.
+
+Example:
+
+    my $enc = leb128_encode([0, 1, 127, 128, 300, 16384]);
+    leb128_decode($enc);    # [0, 1, 127, 128, 300, 16384]
+
+=head2 leb128_decode
+
+    my $integers = leb128_decode($fh);
+    my $integers = leb128_decode($string);
+
+Inverse of C<leb128_encode()>.
 
 =head2 obh_encode
 

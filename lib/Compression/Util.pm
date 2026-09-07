@@ -200,6 +200,20 @@ our %EXPORT_TAGS = (
           deflate_extract_block_type_0
           deflate_extract_block_type_1
           deflate_extract_block_type_2
+
+          golomb_rice_encode
+          golomb_rice_decode
+
+          leb128_encode
+          leb128_decode
+
+          shannon_entropy
+
+          detect_format
+          decompress_auto
+
+          best_compress
+          best_decompress
           )
     ]
 );
@@ -340,6 +354,20 @@ sub frequencies ($symbols) {
     my %freq;
     ++$freq{$_} for @$symbols;
     return \%freq;
+}
+
+sub shannon_entropy ($symbols) {
+
+    my $len  = scalar(@$symbols) || return 0;
+    my $freq = frequencies($symbols);
+
+    my $entropy = 0;
+    foreach my $count (values %$freq) {
+        my $p = $count / $len;
+        $entropy -= $p * log($p);
+    }
+
+    return $entropy / log(2);
 }
 
 sub deltas ($integers) {
@@ -516,6 +544,60 @@ sub abc_decode ($fh) {
             push @integers, oct('0b' . $chunk);
         }
     }
+
+    return \@integers;
+}
+
+################################################
+# LEB128 (byte-aligned variable-length quantity)
+################################################
+
+sub leb128_encode ($integers) {
+
+    my $bytes = '';
+
+    foreach my $n (scalar(@$integers), @$integers) {
+        $n >= 0 or confess "error: leb128_encode() requires non-negative integers";
+
+        my $v = $n;
+        while (1) {
+            my $byte = $v & 0x7f;
+            $v >>= 7;
+            if ($v != 0) {
+                $bytes .= chr($byte | 0x80);
+            }
+            else {
+                $bytes .= chr($byte);
+                last;
+            }
+        }
+    }
+
+    return $bytes;
+}
+
+sub leb128_decode ($fh) {
+
+    if (ref($fh) eq '') {
+        open(my $fh2, '<:raw', \$fh) or confess "error: $!";
+        return __SUB__->($fh2);
+    }
+
+    my $read_one = sub {
+        my ($n, $shift) = (0, 0);
+        while (1) {
+            my $byte = ord(getc($fh) // confess "can't read byte");
+            $n |= ($byte & 0x7f) << $shift;
+            last if !($byte & 0x80);
+            $shift += 7;
+        }
+        return $n;
+    };
+
+    my $len = $read_one->();
+
+    my @integers;
+    push @integers, $read_one->() for (1 .. $len);
 
     return \@integers;
 }
@@ -2350,6 +2432,71 @@ sub elias_omega_decode ($fh) {
     }
 
     return \@ints;
+}
+
+########################################
+# Golomb-Rice coding
+########################################
+
+# Picks a good Rice parameter for a geometrically-distributed sample,
+# using the standard approximation k = ceil(log2(mean * ln(2))).
+# Private helper -- not exported.
+sub _golomb_rice_optimal_k ($integers) {
+
+    return 0 if !@$integers;
+
+    my $mean = sum(@$integers) / scalar(@$integers);
+    return 0 if $mean < 1;
+
+    my ($k, $m) = (0, 1);
+    while ($m < $mean * log(2)) {
+        $m <<= 1;
+        ++$k;
+    }
+
+    return $k;
+}
+
+sub golomb_rice_encode ($integers, $k = undef) {
+
+    $k = _golomb_rice_optimal_k($integers) if !defined($k);
+    $k >= 0 or confess "error: \$k must be non-negative";
+
+    my $header = elias_omega_encode([scalar(@$integers), $k]);
+
+    my $bitstring = '';
+    my $mask      = (1 << $k) - 1;
+
+    foreach my $n (@$integers) {
+        $n >= 0 or confess "error: golomb_rice_encode() requires non-negative integers";
+        my $q = $n >> $k;
+        $bitstring .= ('1' x $q) . '0';
+        $bitstring .= sprintf('%0*b', $k, $n & $mask) if $k > 0;
+    }
+
+    return $header . pack('B*', $bitstring);
+}
+
+sub golomb_rice_decode ($fh) {
+
+    if (ref($fh) eq '') {
+        open(my $fh2, '<:raw', \$fh) or confess "error: $!";
+        return __SUB__->($fh2);
+    }
+
+    my ($len, $k) = @{elias_omega_decode($fh)};
+
+    my @integers;
+    my $buffer = '';
+
+    foreach (1 .. $len) {
+        my $q = 0;
+        ++$q while (read_bit($fh, \$buffer) eq '1');
+        my $r = $k > 0 ? bits2int($fh, $k, \$buffer) : 0;
+        push @integers, ($q << $k) | $r;
+    }
+
+    return \@integers;
 }
 
 ###################
@@ -4836,6 +4983,91 @@ sub lz4_decompress($fh) {
     }
 
     return $decompressed;
+}
+
+################################################
+# Format detection + auto-dispatch decompression
+################################################
+
+sub detect_format ($data) {
+
+    my $peek;
+
+    if (ref($data) eq '') {
+        $peek = substr($data, 0, 4);
+    }
+    else {
+        my $n = read($data, $peek, 4) // confess "error: $!";
+        seek($data, -$n, 1) or confess "error: $!" if $n > 0;
+    }
+
+    return 'gzip'  if substr($peek, 0, 2) eq "\x1f\x8b";
+    return 'bzip2' if substr($peek, 0, 3) eq 'BZh';
+    return 'lz4'   if substr($peek, 0, 4) eq "\x04\x22\x4d\x18";
+
+    if (length($peek) >= 2) {
+        my ($cmf, $flg) = unpack('CC', $peek);
+        if (($cmf & 0x0f) == 8 and (($cmf << 8) + $flg) % 31 == 0) {
+            return 'zlib';
+        }
+    }
+
+    return undef;
+}
+
+sub decompress_auto ($data) {
+
+    my $format = detect_format($data) // confess "error: unrecognized compressed format";
+
+    return gzip_decompress($data)  if $format eq 'gzip';
+    return zlib_decompress($data)  if $format eq 'zlib';
+    return bzip2_decompress($data) if $format eq 'bzip2';
+    return lz4_decompress($data)   if $format eq 'lz4';
+
+    confess "error: unhandled format: $format";    # unreachable, kept for safety
+}
+
+########################################
+# Best-of-N meta-compressor
+########################################
+
+sub best_compress ($data, $methods = undef) {
+
+    $methods //= [['G', \&gzip_compress], ['B', \&bwt_compress], ['M', \&mrl_compress],];
+
+    my ($best_tag, $best_out);
+
+    foreach my $pair (@$methods) {
+        my ($tag, $sub) = @$pair;
+        length($tag) == 1 or confess "error: tag must be a single character";
+
+        my $out = $sub->($data);
+
+        if (!defined($best_out) or length($out) < length($best_out)) {
+            ($best_tag, $best_out) = ($tag, $out);
+        }
+    }
+
+    return $best_tag . $best_out;
+}
+
+sub best_decompress ($fh, $methods = undef) {
+
+    if (ref($fh) eq '') {
+        open(my $fh2, '<:raw', \$fh) or confess "error: $!";
+        return __SUB__->($fh2, $methods);
+    }
+
+    $methods //= {
+                  'G' => \&gzip_decompress,
+                  'B' => \&bwt_decompress,
+                  'M' => \&mrl_decompress,
+                 };
+
+    my $tag = getc($fh)        // confess "error: can't read compression tag";
+    my $sub = $methods->{$tag} // confess "error: unknown compression tag: '$tag'";
+
+    return $sub->($fh);
 }
 
 1;

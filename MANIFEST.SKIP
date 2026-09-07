@@ -84,3 +84,4 @@
 
 # Skip the devel path
 \bdevel/
+\bbench/
