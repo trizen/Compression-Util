@@ -7,7 +7,7 @@ Compression::Util - Implementation of various techniques used in data compressio
 
 =head1 VERSION
 
-Version 0.17
+Version 0.18
 
 =head1 SYNOPSIS
 

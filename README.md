@@ -47,7 +47,7 @@ cpan Compression::Util
 
 ---
 
-**Version:** `0.17`
+**Version:** `0.18`
 
 <a id="quick-start"></a>
 
