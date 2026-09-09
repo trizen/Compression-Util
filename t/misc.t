@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle min max);
 
-plan tests => 956;
+plan tests => 957;
 
 ##################################
 
@@ -197,6 +197,7 @@ is_deeply(lzss_decompress_symbolic(lzss_compress_symbolic([])),  []);
     is(lzw_decompress(lzw_compress($str)), $str);
     is(lzw_decompress(lzw_compress($str, \&delta_encode),             \&delta_decode),             $str);
     is(lzw_decompress(lzw_compress($str, \&elias_omega_encode),       \&elias_omega_decode),       $str);
+    is(lzw_decompress(lzw_compress($str, \&elias_delta_encode),       \&elias_delta_decode),       $str);
     is(lzw_decompress(lzw_compress($str, \&fibonacci_encode),         \&fibonacci_decode),         $str);
     is(lzw_decompress(lzw_compress($str, \&elias_gamma_encode),       \&elias_gamma_decode),       $str);
     is(lzw_decompress(lzw_compress($str, \&create_ac_entry),          \&decode_ac_entry),          $str);
