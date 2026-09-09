@@ -307,7 +307,7 @@ Individual transforms and entropy coders, meant to be composed together into you
       deltas(\@ints)                       # Computes the differences between integers
       accumulate(\@deltas)                 # Inverse of the above method
 
-      delta_encode(\@ints)                 # Delta+RLE+Elias omega encoding of an array-ref of integers
+      delta_encode(\@ints)                 # Deltas+RLE+Elias delta encoding of an array-ref of integers
       delta_decode($fh)                    # Inverse of the above method
 
       fibonacci_encode(\@symbols)          # Fibonacci coding of an array-ref of symbols
@@ -791,7 +791,17 @@ Example:
 
 Inverse of C<best_compress()>. Reads the single-character method tag and dispatches to the corresponding decompressor.
 
-The default C<%methods> mapping (C<< G => \&gzip_decompress, B => \&bwt_decompress, M => \&mrl_decompress >>) matches C<best_compress()>'s default set. If C<best_compress()> was called with a custom C<\@methods> list, pass the corresponding C<{tag => $decompress_sub}> hash-ref here as well.
+The default C<%methods> mapping:
+
+    %methods = (
+        G => \&gzip_decompress,
+        B => \&bwt_decompress,
+        M => \&mrl_decompress,
+    )
+
+matches C<best_compress()>'s default set.
+
+If C<best_compress()> was called with a custom C<\@methods> list, pass the corresponding C<<< {tag => $decompress_sub} >>> hash-ref here as well.
 
 =cut
 
@@ -845,9 +855,9 @@ Inverse of C<deltas()>. For example:
 
     my $string = delta_encode(\@integers);
 
-Encodes a sequence of integers (including negative integers) using Delta + Run-length + Elias omega coding, returning a binary string.
+Encodes a sequence of integers (including negative integers) using Deltas + Run-length + Elias delta coding, returning a binary string.
 
-Delta encoding calculates the difference between consecutive integers in the sequence and encodes these differences using Elias omega coding. When it's beneficial, runs of identical symbols are collapsed with RLE.
+Delta encoding calculates the difference between consecutive integers in the sequence and encodes these differences using Elias delta coding. When it's beneficial, runs of identical symbols are collapsed with RLE.
 
 This method supports both positive and negative integers, and is well suited to sequences that increase monotonically or vary smoothly, such as timestamps or sorted indices.
 
