@@ -5,7 +5,7 @@ use Test::More;
 use Compression::Util qw(:all);
 use List::Util        qw(shuffle min max);
 
-plan tests => 943;
+plan tests => 956;
 
 ##################################
 
@@ -20,6 +20,7 @@ sub test_array ($arr) {
     is_deeply(ac_decode(ac_encode($arr)),                        $arr);
     is_deeply(adaptive_ac_decode(adaptive_ac_encode($arr)),      $arr);
     is_deeply(elias_gamma_decode(elias_gamma_encode($arr)),      $arr);
+    is_deeply(elias_delta_decode(elias_delta_encode($arr)),      $arr);
     is_deeply(elias_omega_decode(elias_omega_encode($arr)),      $arr);
     is_deeply(fibonacci_decode(fibonacci_encode($arr)),          $arr);
     is_deeply(delta_decode(delta_encode($arr)),                  $arr);

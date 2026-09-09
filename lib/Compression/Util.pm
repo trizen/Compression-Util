@@ -176,6 +176,9 @@ our %EXPORT_TAGS = (
           elias_gamma_encode
           elias_gamma_decode
 
+          elias_delta_encode
+          elias_delta_decode
+
           elias_omega_encode
           elias_omega_decode
 
@@ -2377,22 +2380,71 @@ sub elias_gamma_decode ($fh) {
 }
 
 #####################
+# Elias delta coding
+#####################
+
+sub elias_delta_encode ($integers) {
+
+    my $bitstring = '';
+    foreach my $k (scalar(@$integers), @$integers) {
+        my $t = sprintf('%b', $k + 1);
+        my $l = length($t);
+        my $L = sprintf('%b', $l);
+        $bitstring .= ('1' x (length($L) - 1)) . '0' . substr($L, 1) . substr($t, 1);
+    }
+
+    pack('B*', $bitstring);
+}
+
+sub elias_delta_decode ($fh) {
+
+    if (ref($fh) eq '') {
+        open(my $fh2, '<:raw', \$fh) or confess "error: $!";
+        return __SUB__->($fh2);
+    }
+
+    my @ints;
+    my $len    = 0;
+    my $buffer = '';
+
+    for (my $k = 0 ; $k <= $len ; ++$k) {
+
+        my $bl = 0;
+        ++$bl while (read_bit($fh, \$buffer) eq '1');
+
+        my $bl2 = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. $bl));
+        my $int = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. ($bl2 - 1))) - 1;
+
+        push @ints, $int;
+
+        if ($k == 0) {
+            $len = pop(@ints);
+        }
+    }
+
+    return \@ints;
+}
+
+#####################
 # Elias omega coding
 #####################
 
 sub elias_omega_encode ($integers) {
 
     my $bitstring = '';
+
     foreach my $k (scalar(@$integers), @$integers) {
-        if ($k == 0) {
-            $bitstring .= '0';
+
+        my $n    = $k + 1;    # shift by one, so 0 can be encoded
+        my $code = '0';       # terminator bit
+
+        while ($n != 1) {
+            my $t = sprintf('%b', $n);
+            $code = $t . $code;
+            $n    = length($t) - 1;
         }
-        else {
-            my $t = sprintf('%b', $k + 1);
-            my $l = length($t);
-            my $L = sprintf('%b', $l);
-            $bitstring .= ('1' x (length($L) - 1)) . '0' . substr($L, 1) . substr($t, 1);
-        }
+
+        $bitstring .= $code;
     }
 
     pack('B*', $bitstring);
@@ -2411,19 +2463,13 @@ sub elias_omega_decode ($fh) {
 
     for (my $k = 0 ; $k <= $len ; ++$k) {
 
-        my $bl = 0;
-        ++$bl while (read_bit($fh, \$buffer) eq '1');
+        my $n = 1;
 
-        if ($bl > 0) {
-
-            my $bl2 = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. $bl));
-            my $int = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. ($bl2 - 1))) - 1;
-
-            push @ints, $int;
+        while (read_bit($fh, \$buffer) eq '1') {
+            $n = oct('0b1' . join('', map { read_bit($fh, \$buffer) } 1 .. $n));
         }
-        else {
-            push @ints, 0;
-        }
+
+        push @ints, $n - 1;
 
         if ($k == 0) {
             $len = pop(@ints);
@@ -2461,7 +2507,7 @@ sub golomb_rice_encode ($integers, $k = undef) {
     $k = _golomb_rice_optimal_k($integers) if !defined($k);
     $k >= 0 or confess "error: \$k must be non-negative";
 
-    my $header = elias_omega_encode([scalar(@$integers), $k]);
+    my $header = fibonacci_encode([scalar(@$integers), $k]);
 
     my $bitstring = '';
     my $mask      = (1 << $k) - 1;
@@ -2483,7 +2529,7 @@ sub golomb_rice_decode ($fh) {
         return __SUB__->($fh2);
     }
 
-    my ($len, $k) = @{elias_omega_decode($fh)};
+    my ($len, $k) = @{fibonacci_decode($fh)};
 
     my @integers;
     my $buffer = '';

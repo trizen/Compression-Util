@@ -59,7 +59,7 @@ B<Compression::Util> is a function-based module, implementing various techniques
     * Arithmetic Coding (in fixed bits, static and adaptive)
     * Run-length encoding
     * Fibonacci coding
-    * Elias gamma/omega coding
+    * Elias gamma/delta/omega coding
     * Delta coding
     * BWT-based (de)compression
     * LZ77/LZSS (de)compression
@@ -315,6 +315,9 @@ Individual transforms and entropy coders, meant to be composed together into you
 
       elias_gamma_encode(\@symbols)        # Elias Gamma coding method of an array-ref of symbols
       elias_gamma_decode($fh)              # Inverse of the above method
+
+      elias_delta_encode(\@symbols)        # Elias Delta coding method of an array-ref of symbols
+      elias_delta_decode($fh)              # Inverse of the above method
 
       elias_omega_encode(\@symbols)        # Elias Omega coding method of an array-ref of symbols
       elias_omega_decode($fh)              # Inverse of the above method
@@ -889,6 +892,22 @@ Encodes a sequence of non-negative integers using Elias Gamma coding, returning 
     my $symbols = elias_gamma_decode($string);
 
 Inverse of C<elias_gamma_encode()>.
+
+=head2 elias_delta_encode
+
+    my $string = elias_delta_encode(\@symbols);
+
+Encodes a sequence of non-negative integers using Elias Delta coding, returning a binary string. Elias Delta coding encodes the bit-length of each value using Elias Gamma coding, then appends the value's remaining bits directly. It sits between Elias Gamma and Elias Omega: tighter than Gamma on large values, without Omega's fully recursive length-of-length encoding.
+
+=head2 elias_delta_decode
+
+    # Given a file-handle
+    my $symbols = elias_delta_decode($fh);
+
+    # Given a binary string
+    my $symbols = elias_delta_decode($string);
+
+Inverse of C<elias_delta_encode()>.
 
 =head2 elias_omega_encode
 
